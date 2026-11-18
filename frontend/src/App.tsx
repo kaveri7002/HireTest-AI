@@ -24,6 +24,7 @@ type Job = {
   location: string
   type: string
   description: string
+  isDemo: boolean
 }
 
 type StudentApplication = {
@@ -47,6 +48,7 @@ type TestCase = {
   expectedResult: string
   priority: 'High' | 'Medium' | 'Low'
   approved: boolean
+  isExample: boolean
 }
 type User = { id: string; name: string; email: string; role: 'student' | 'recruiter' }
 
@@ -452,7 +454,7 @@ function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onAppl
   return (
     <>
       <section className="welcome-row">
-        <div><p className="eyebrow">APPLICATION UNDER TEST</p><h1>HireTest <em>Jobs.</em></h1><p className="welcome-subtitle">A real job portal that HireTest AI will exercise with browser tests.</p></div>
+        <div><p className="eyebrow">APPLICATION UNDER TEST</p><h1>HireTest <em>Jobs.</em></h1><p className="welcome-subtitle">Browse listings and explore the job application workflow. Demo listings are fictional and cannot accept applications.</p></div>
         <span className="aut-badge"><span /> LIVE APPLICATION</span>
       </section>
       <section className="jobs-toolbar panel"><div className="search-field"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') onSearch() }} placeholder="Search role, company, or location" aria-label="Search jobs" /><button onClick={onSearch}>Search</button></div><button className="button button-secondary"><ChevronDown size={15} /> All job types</button></section>
@@ -462,7 +464,7 @@ function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onAppl
           {loading ? <div className="panel table-empty">Loading job listings…</div> : jobs.length ? jobs.map((job) => {
             const application = myApplications.find((item) => item.job.id === job.id)
             return <div key={job.id}>
-              <article className="panel job-card"><div className="company-mark">{job.company.slice(0, 1).toUpperCase()}</div><div className="job-copy"><div className="job-title-row"><h3>{job.title}</h3><span className="job-type">{job.type}</span></div><p>{job.company} <span>·</span> {job.location}</p><small>{job.description}</small></div>{user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application)} onClick={() => onApply(job.id)}>{application ? `Applied · ${application.status}` : 'Apply'}</button> : <button className="button button-secondary" onClick={() => onViewApplicants(job.id)}>View applicants</button>}</article>
+              <article className="panel job-card"><div className="company-mark">{job.company.slice(0, 1).toUpperCase()}</div><div className="job-copy"><div className="job-title-row"><h3>{job.title}</h3><span className="job-type">{job.type}</span>{job.isDemo && <span className="demo-label">DEMO ONLY</span>}</div><p>{job.company} <span>·</span> {job.location}</p><small>{job.description}</small></div>{user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => onApply(job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : 'Apply'}</button> : <button className="button button-secondary" disabled={job.isDemo} onClick={() => onViewApplicants(job.id)}>{job.isDemo ? 'Sample only' : 'View applicants'}</button>}</article>
               {user.role === 'recruiter' && applicantsForJob === job.id && <section className="panel applicant-list"><h3>Applicants for {job.title}</h3>{applicants.length ? applicants.map((applicant) => <div className="applicant-row" key={applicant.id}><div><strong>{applicant.student.name}</strong><span>{applicant.student.email}</span></div><select aria-label={`Status for ${applicant.student.name}`} value={applicant.status} onChange={(event) => onUpdateApplication(applicant.id, event.target.value)}><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>) : <p>No applications have been submitted for this role yet.</p>}</section>}
             </div>
           }) : <div className="panel job-empty"><div className="empty-icon"><BriefcaseBusiness size={20} /></div><strong>No jobs found</strong><span>Job listings come from the configured database. Add a real listing below.</span></div>}
@@ -479,7 +481,7 @@ function CasesPage({ cases, requirement, setRequirement, onGenerate, busy }: { c
     <>
       <section className="welcome-row"><div><p className="eyebrow">SAFE TEST DESIGN</p><h1>Test case <em>generator.</em></h1><p className="welcome-subtitle">Turn a plain-English requirement into reviewable test scenarios.</p></div><span className="aut-badge"><Sparkles size={14} /> RULE-BASED FALLBACK</span></section>
       <section className="panel generator-panel"><div className="generator-icon"><Sparkles size={20} /></div><div className="generator-copy"><h2>Describe what should work</h2><p>Test cases are structured data, not executable generated code. AI integration can be configured later.</p><form className="generator-form" onSubmit={onGenerate}><textarea value={requirement} onChange={(event) => setRequirement(event.target.value)} placeholder="Example: Students can sign in using a valid email address and password." rows={3} required /><button className="button button-primary" disabled={busy}><Sparkles size={16} /> {busy ? 'Generating…' : 'Generate test cases'}</button></form></div></section>
-      <section className="panel case-list-panel"><div className="panel-heading"><div><h2>Generated test cases</h2><p>{cases.length} in this session · approve before execution</p></div><button className="button button-secondary" disabled={!cases.length}>Select all</button></div>{cases.length ? <div className="case-list">{cases.map((testCase) => <article className="case-card" key={testCase.id}><div className="case-check"><input type="checkbox" aria-label={`Select ${testCase.title}`} /></div><div className="case-main"><div className="case-meta"><span className="case-id">{testCase.id}</span><span className={`priority-pill priority-${testCase.priority.toLowerCase()}`}>{testCase.priority}</span><span className="case-type">Functional</span></div><h3>{testCase.title}</h3><p>{testCase.scenario}</p><div className="expected"><strong>Expected result</strong><span>{testCase.expectedResult}</span></div></div><button className={`approval-badge ${testCase.approved ? 'approved' : ''}`}>{testCase.approved ? 'Approved' : 'Review'}</button></article>)}</div> : <div className="job-empty"><div className="empty-icon"><ListChecks size={20} /></div><strong>No test cases yet</strong><span>Enter a requirement above to generate positive and negative scenarios.</span></div>}</section>
+      <section className="panel case-list-panel"><div className="panel-heading"><div><h2>Generated test cases</h2><p>{cases.length} in your workspace · review before execution</p></div><button className="button button-secondary" disabled={!cases.length}>Select all</button></div>{cases.length ? <div className="case-list">{cases.map((testCase) => <article className="case-card" key={testCase.id}><div className="case-check"><input type="checkbox" aria-label={`Select ${testCase.title}`} /></div><div className="case-main"><div className="case-meta"><span className="case-id">{testCase.id}</span><span className={`priority-pill priority-${testCase.priority.toLowerCase()}`}>{testCase.priority}</span><span className="case-type">{testCase.isExample ? 'Starter example' : 'Functional'}</span></div><h3>{testCase.title}</h3><p>{testCase.scenario}</p><div className="expected"><strong>Expected result</strong><span>{testCase.expectedResult}</span></div></div><button className={`approval-badge ${testCase.approved ? 'approved' : ''}`}>{testCase.approved ? 'Approved' : 'Review'}</button></article>)}</div> : <div className="job-empty"><div className="empty-icon"><ListChecks size={20} /></div><strong>No test cases yet</strong><span>Starter examples will appear here. Generate more from a requirement above.</span></div>}</section>
     </>
   )
 }

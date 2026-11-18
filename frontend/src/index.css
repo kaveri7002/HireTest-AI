@@ -125,6 +125,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .job-title-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .job-title-row h3{margin:0;color:#343a4b;font:700 11px Manrope,sans-serif}
 .job-type{padding:4px 7px;border-radius:5px;background:#f2f4f8;color:#82899a;font-size:8px}
+.demo-label{padding:4px 7px;border-radius:5px;background:#fff3e5;color:#a5631a;font-size:8px;font-weight:700}
 .job-copy p{margin:6px 0;color:#70798b;font-size:9px}
 .job-copy p span{padding:0 4px;color:#b1b5c0}
 .job-copy small{color:#a1a6b1;font-size:8px}

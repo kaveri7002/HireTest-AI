@@ -47,7 +47,24 @@ def test_job_creation_is_recruiter_only_and_listing_is_searchable(client, recrui
     })
     assert created.status_code == 201
     assert created.json["job"]["title"] == "QA Analyst"
-    assert client.get("/api/jobs?search=example").json["jobs"][0]["id"] == created.json["job"]["id"]
+    listed = client.get("/api/jobs?search=example").json["jobs"]
+    assert listed[0]["id"] == created.json["job"]["id"]
+    assert not any(job["isDemo"] for job in listed)
+
+
+def test_empty_job_board_gets_labeled_demo_listings_that_cannot_accept_applications(client, student_headers):
+    first = client.get("/api/jobs")
+    second = client.get("/api/jobs")
+
+    assert first.status_code == 200
+    assert len(first.json["jobs"]) == 3
+    assert all(job["isDemo"] for job in first.json["jobs"])
+    assert first.json["jobs"] == second.json["jobs"]
+    assert all("DEMO ONLY" in job["description"] for job in first.json["jobs"])
+    demo_job_id = first.json["jobs"][0]["id"]
+    application = client.post(f"/api/jobs/{demo_job_id}/applications", headers=student_headers)
+    assert application.status_code == 409
+    assert "cannot accept applications" in application.json["error"]
 
 
 def test_rule_based_test_cases_are_saved_for_the_tester(client, student_headers):
@@ -61,6 +78,17 @@ def test_rule_based_test_cases_are_saved_for_the_tester(client, student_headers)
 
     listed = client.get("/api/test-cases", headers=student_headers)
     assert len(listed.json["testCases"]) == 3
+    assert client.get("/api/dashboard", headers=student_headers).json["total"] == 0
+
+
+def test_empty_test_case_workspace_gets_unapproved_starter_examples(client, student_headers):
+    first = client.get("/api/test-cases", headers=student_headers)
+    second = client.get("/api/test-cases", headers=student_headers)
+
+    assert first.status_code == 200
+    assert len(first.json["testCases"]) == 3
+    assert first.json["testCases"] == second.json["testCases"]
+    assert all(case["isExample"] and not case["approved"] for case in first.json["testCases"])
     assert client.get("/api/dashboard", headers=student_headers).json["total"] == 0
 
 

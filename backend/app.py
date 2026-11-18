@@ -50,6 +50,67 @@ def _user_payload(user):
     return {"id": str(user["_id"]), "name": user["name"], "email": user["email"], "role": user["role"]}
 
 
+def _seed_demo_jobs(database):
+    if database["jobs"].count_documents({"status": "published"}) > 0:
+        return
+    created_at = _utc_now()
+    listings = [
+        ("qa-analyst", "Junior QA Analyst", "Remote", "Review sample requirements and explore manual testing workflows."),
+        ("frontend-tester", "Frontend Test Engineer", "Bengaluru, India", "Explore example browser-testing scenarios for a sample product."),
+        ("software-test-intern", "Software Test Intern", "Remote", "Practice reviewing starter test cases in the HireTest demo."),
+    ]
+    for key, title, location, description in listings:
+        database["jobs"].update_one(
+            {"demo_key": key},
+            {"$setOnInsert": {
+                "demo_key": key,
+                "is_demo": True,
+                "title": title,
+                "company": "HireTest Demo Studio",
+                "location": location,
+                "description": f"DEMO ONLY — fictional sample listing, not a real vacancy. {description}",
+                "type": "Full time",
+                "status": "published",
+                "recruiter_id": None,
+                "created_at": created_at,
+            }},
+            upsert=True,
+        )
+
+
+def _seed_starter_test_cases(database, user_id):
+    if database["test_cases"].count_documents({"created_by": user_id}) > 0:
+        return
+    examples = [
+        ("job-search-results", "Matching search returns results", "Search using text from an existing job listing.", "Matching job listings are displayed.", "High"),
+        ("job-search-empty-state", "No-match search shows an empty state", "Search using text that does not match any listing.", "A clear no-results message is displayed.", "Medium"),
+        ("published-job-visibility", "Published jobs appear in the jobs list", "Create and publish a job as a recruiter, then view the list as a student.", "The published job appears in the student's open roles.", "Low"),
+    ]
+    created_at = _utc_now()
+    for key, title, scenario, expected, priority in examples:
+        case = {
+            "sample_key": key,
+            "title": title,
+            "scenario": scenario,
+            "preconditions": ["HireTest Jobs application is available."],
+            "steps": [scenario],
+            "expected_result": expected,
+            "priority": priority,
+            "test_type": "functional",
+            "test_data": {},
+            "automation_status": "template_available",
+            "approved": False,
+            "is_example": True,
+            "created_by": user_id,
+            "created_at": created_at,
+        }
+        database["test_cases"].update_one(
+            {"created_by": user_id, "sample_key": key},
+            {"$setOnInsert": case},
+            upsert=True,
+        )
+
+
 def _authorized_user():
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token:
@@ -117,8 +178,14 @@ def create_app(test_config=None):
         try:
             database["users"].create_index("email", unique=True)
             database["jobs"].create_index([("status", 1), ("created_at", -1)])
+            database["jobs"].create_index("demo_key", unique=True, sparse=True)
             database["applications"].create_index([("student_id", 1), ("job_id", 1)], unique=True)
             database["test_cases"].create_index([("created_by", 1), ("created_at", -1)])
+            database["test_cases"].create_index(
+                [("created_by", 1), ("sample_key", 1)],
+                unique=True,
+                partialFilterExpression={"sample_key": {"$exists": True}},
+            )
             database["test_executions"].create_index([("created_by", 1), ("created_at", -1)])
             database["test_results"].create_index([("created_by", 1), ("created_at", -1)])
         except PyMongoError:
@@ -228,6 +295,8 @@ def create_app(test_config=None):
 
     @app.get("/api/jobs")
     def list_jobs():
+        database = _database()
+        _seed_demo_jobs(database)
         query = request.args.get("search", "").strip()
         filters = {"status": "published"}
         if query:
@@ -237,7 +306,7 @@ def create_app(test_config=None):
                 {"company": {"$regex": safe_query, "$options": "i"}},
                 {"location": {"$regex": safe_query, "$options": "i"}},
             ]
-        jobs = list(_database()["jobs"].find(filters).sort("created_at", -1).limit(100))
+        jobs = list(database["jobs"].find(filters).sort("created_at", -1).limit(100))
         return jsonify({"jobs": [
             {
                 "id": str(job["_id"]),
@@ -246,6 +315,7 @@ def create_app(test_config=None):
                 "location": job["location"],
                 "type": job.get("type", "Full time"),
                 "description": job["description"],
+                "isDemo": job.get("is_demo", False),
             }
             for job in jobs
         ]})
@@ -267,6 +337,7 @@ def create_app(test_config=None):
             "type": body.get("type", "Full time"),
             "status": "published",
             "recruiter_id": g.user["_id"],
+            "is_demo": False,
             "created_at": _utc_now(),
         }
         result = _database()["jobs"].insert_one(job)
@@ -277,6 +348,7 @@ def create_app(test_config=None):
             "location": job["location"],
             "type": job["type"],
             "description": job["description"],
+            "isDemo": False,
         }}), 201
 
     @app.get("/api/jobs/<job_id>")
@@ -293,6 +365,7 @@ def create_app(test_config=None):
             "location": job["location"],
             "type": job.get("type", "Full time"),
             "description": job["description"],
+            "isDemo": job.get("is_demo", False),
         }})
 
     @app.post("/api/jobs/<job_id>/applications")
@@ -304,6 +377,8 @@ def create_app(test_config=None):
         job = database["jobs"].find_one({"_id": ObjectId(job_id), "status": "published"})
         if job is None:
             return jsonify({"error": "Job not found."}), 404
+        if job.get("is_demo"):
+            return jsonify({"error": "Demo listings are for browsing only and cannot accept applications."}), 409
         application = {
             "job_id": job["_id"],
             "student_id": g.user["_id"],
@@ -465,7 +540,9 @@ def create_app(test_config=None):
     @app.get("/api/test-cases")
     @require_user()
     def list_test_cases():
-        cases = list(_database()["test_cases"].find({"created_by": g.user["_id"]}).sort("created_at", -1).limit(200))
+        database = _database()
+        _seed_starter_test_cases(database, g.user["_id"])
+        cases = list(database["test_cases"].find({"created_by": g.user["_id"]}).sort("created_at", -1).limit(200))
         return jsonify({"testCases": [
             {
                 "id": str(case["_id"]),
@@ -474,6 +551,7 @@ def create_app(test_config=None):
                 "expectedResult": case["expected_result"],
                 "priority": case["priority"],
                 "approved": case["approved"],
+                "isExample": case.get("is_example", False),
             }
             for case in cases
         ]})

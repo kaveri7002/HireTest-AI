@@ -13,6 +13,7 @@ HireTest AI is an AI-assisted software testing platform. Its application under t
 - Student and recruiter account registration/sign-in with hashed passwords and signed expiring tokens.
 - MongoDB-backed job listing, recruiter job creation, student applications, and recruiter applicant status updates.
 - Rule-based test-case generation stored per signed-in tester; no generated code is executed.
+- Clearly labeled fictional job listings and unapproved starter test-case examples appear when a workspace is empty. Demo listings cannot accept applications, and examples do not create test results.
 - Dashboard counts sourced from stored test-result records.
 - API tests and a Playwright page-object end-to-end job-application test.
 
