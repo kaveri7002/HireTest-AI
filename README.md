@@ -12,14 +12,16 @@ HireTest AI is an AI-assisted software testing platform. Its application under t
 - Flask REST API with MongoDB Atlas/PyMongo configuration.
 - Student and recruiter account registration/sign-in with hashed passwords and signed expiring tokens.
 - MongoDB-backed job listing, recruiter job creation, student applications, and recruiter applicant status updates.
-- Rule-based test-case generation stored per signed-in tester; no generated code is executed.
+- Job-type filters, job sorting, device-local saved-job shortlists, and recruiter applicant search/status filters.
+- Rule-based test-case generation stored per signed-in tester; test cases can be edited and approved before execution, and no generated code is executed.
 - Clearly labeled fictional job listings and unapproved starter test-case examples appear when a workspace is empty. Demo listings cannot accept applications, and examples do not create test results.
+- The installable app checks for updates on launch, when returning to the app, and periodically while online.
 - Dashboard counts sourced from stored test-result records.
 - API tests and a Playwright page-object end-to-end job-application test.
 
 ### Not implemented yet
 
-The full master prompt is larger than a single safe delivery. Background Playwright test execution, test-case approvals/edits, bug triage, visual regression, PDF reports, AI-provider integration, and production deployment are later phases. The UI labels these areas as under development instead of presenting fake outcomes.
+The full master prompt is larger than a single safe delivery. Background Playwright test execution, bug triage, visual regression, PDF reports, and AI-provider integration are later phases. The UI labels these areas as under development instead of presenting fake outcomes.
 
 ## Architecture
 

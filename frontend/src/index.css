@@ -115,6 +115,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .search-field{display:flex;align-items:center;gap:9px;flex:1;color:#969cac}
 .search-field input{width:100%;border:0;outline:0;color:#3e4555;font-size:10px}
 .search-field button{min-width:64px;height:31px;border:0;border-radius:7px;background:#f1efff;color:#6354d9;font-size:9px;font-weight:700}
+.job-filter-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.job-filter-controls select,.applicant-filters select{min-height:32px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:0 9px;color:#626a7b;font-size:9px}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .jobs-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.8fr);align-items:start;gap:14px}
 .job-results{display:grid;gap:10px}
 .section-title{display:flex;align-items:center;gap:10px;padding:3px 0 4px}
@@ -130,8 +133,15 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .job-copy p span{padding:0 4px;color:#b1b5c0}
 .job-copy small{color:#a1a6b1;font-size:8px}
 .job-card>.button{min-height:30px}
+.save-job-button,.icon-button{display:grid;place-items:center;flex:none;width:32px;height:32px;border:1px solid var(--line);border-radius:7px;background:#fff;color:#8f96a5}
+.save-job-button.saved{border-color:#e8e4ff;background:#f5f3ff;color:var(--purple)}
 .applicant-list,.my-applications{display:grid;gap:10px;padding:14px}
 .applicant-list h3{margin:0;color:#343a4b;font:700 11px Manrope,sans-serif}
+.applicant-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.applicant-heading>span{color:#969cab;font-size:9px}
+.applicant-filters{display:flex;gap:8px}
+.applicant-filters input{min-width:0;flex:1;border:1px solid #e8eaf0;border-radius:6px;padding:7px;background:#fff;color:#5e6677;font-size:9px}
+.applicant-filters select{max-width:145px}
 .applicant-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #f0f1f5}
 .applicant-row>div{display:grid;gap:3px;min-width:0}
 .applicant-row strong{color:#454b5c;font-size:10px}
@@ -142,7 +152,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .job-create-panel{position:sticky;top:76px}
 .quick-form{display:grid;gap:11px;margin-top:15px}
 .quick-form label{display:grid;gap:5px;color:#5e6677;font-size:9px;font-weight:600}
-.quick-form input,.quick-form textarea,.generator-form textarea{width:100%;resize:vertical;border:1px solid #e8eaf0;border-radius:7px;padding:9px 10px;background:#fff;color:#343a4b;font-size:10px}
+.quick-form input,.quick-form textarea,.quick-form select,.generator-form textarea{width:100%;resize:vertical;border:1px solid #e8eaf0;border-radius:7px;padding:9px 10px;background:#fff;color:#343a4b;font-size:10px}
 .quick-form input::placeholder,.quick-form textarea::placeholder,.generator-form textarea::placeholder{color:#b0b5bf}
 .quick-form textarea{min-height:70px}
 .aut-badge{display:flex;align-items:center;gap:7px;padding:7px 9px;border:1px solid #dff2e8;border-radius:6px;background:#f2fbf6;color:#389469;font-size:8px;font-weight:700;letter-spacing:.3px}
@@ -160,6 +170,12 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .case-check{padding-top:2px}
 .case-check input{accent-color:var(--purple)}
 .case-main{min-width:0;flex:1}
+.case-actions{display:flex;align-items:center;gap:6px}
+.case-actions .approval-badge{margin-left:0}
+.case-edit-form{display:grid;flex:1;gap:10px}
+.case-edit-form label{display:grid;gap:5px;color:#5e6677;font-size:9px;font-weight:600}
+.case-edit-form input,.case-edit-form textarea,.case-edit-form select{width:100%;resize:vertical;border:1px solid #e8eaf0;border-radius:7px;padding:8px 9px;background:#fff;color:#343a4b;font-size:10px}
+.case-edit-actions{display:flex;gap:8px}
 .case-meta{display:flex;align-items:center;gap:7px}
 .case-id,.case-type,.priority-pill{padding:4px 6px;border-radius:5px;background:#f3f4f8;color:#7e8696;font-size:8px}
 .priority-high{background:#fff0ef;color:#cd5c5c}
@@ -206,7 +222,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .auth-privacy{margin:16px 0 0;color:#969cab;font-size:10px;line-height:1.6;text-align:center}
 .auth-loading{display:grid;min-height:100vh;place-items:center;color:#767d8d;font-size:13px}
 @media(max-width:1100px){.sidebar{width:220px}.main-area{width:calc(100% - 220px);margin-left:220px}.page-content{padding:29px 23px}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-grid{grid-template-columns:1fr}.jobs-layout{grid-template-columns:1fr}.job-create-panel{position:static}}
-@media(max-width:700px){.sidebar{width:250px;transform:translateX(-102%);transition:transform .2s ease;box-shadow:none}.sidebar-open{transform:translateX(0);box-shadow:14px 0 45px #18204420}.mobile-backdrop{position:fixed;inset:0;z-index:4;display:block;border:0;background:#1f233b70}.menu-button,.mobile-close{display:grid}.mobile-close{margin-left:auto}.main-area{width:100%;margin-left:0}.topbar{height:55px;padding:0 15px}.breadcrumb{gap:7px}.breadcrumb>span:first-of-type{display:none}.topbar-right{gap:9px}.page-content{padding:24px 14px 32px}.welcome-row{align-items:flex-start;flex-direction:column;margin-bottom:20px}.welcome-row h1{font-size:23px}.welcome-row>.button{align-self:stretch}.metric-grid{gap:8px}.metric-card{min-height:125px;padding:11px}.metric-foot{flex-direction:column;gap:3px}.panel{padding:14px}.dashboard-grid{gap:9px;margin-top:9px}.recent-panel{margin-top:9px}.chart-wrap{height:180px}.table-empty{flex-wrap:wrap}.table-empty>.button{margin-left:45px}.execution-row{grid-template-columns:10px minmax(70px,1fr) 70px}.execution-row span:last-child{display:none}.jobs-toolbar{align-items:stretch;flex-direction:column}.job-card{flex-wrap:wrap}.job-card>.button{margin-left:49px}.generator-panel{gap:10px;padding:14px}.case-card{gap:7px}.approval-badge{font-size:7px}.aut-badge{align-self:flex-start}}
+@media(max-width:700px){.sidebar{width:250px;transform:translateX(-102%);transition:transform .2s ease;box-shadow:none}.sidebar-open{transform:translateX(0);box-shadow:14px 0 45px #18204420}.mobile-backdrop{position:fixed;inset:0;z-index:4;display:block;border:0;background:#1f233b70}.menu-button,.mobile-close{display:grid}.mobile-close{margin-left:auto}.main-area{width:100%;margin-left:0}.topbar{height:55px;padding:0 15px}.breadcrumb{gap:7px}.breadcrumb>span:first-of-type{display:none}.topbar-right{gap:9px}.page-content{padding:24px 14px 32px}.welcome-row{align-items:flex-start;flex-direction:column;margin-bottom:20px}.welcome-row h1{font-size:23px}.welcome-row>.button{align-self:stretch}.metric-grid{gap:8px}.metric-card{min-height:125px;padding:11px}.metric-foot{flex-direction:column;gap:3px}.panel{padding:14px}.dashboard-grid{gap:9px;margin-top:9px}.recent-panel{margin-top:9px}.chart-wrap{height:180px}.table-empty{flex-wrap:wrap}.table-empty>.button{margin-left:45px}.execution-row{grid-template-columns:10px minmax(70px,1fr) 70px}.execution-row span:last-child{display:none}.jobs-toolbar{align-items:stretch;flex-direction:column}.job-filter-controls>*{flex:1}.job-card{flex-wrap:wrap}.job-card>.button{margin-left:0}.generator-panel{gap:10px;padding:14px}.case-card{gap:7px}.approval-badge{font-size:7px}.aut-badge{align-self:flex-start}}
 @media(max-width:380px){.metric-card{padding:9px}.metric-value{font-size:20px}.connection-pill{font-size:8px}.help-button{width:27px}.page-content{padding-inline:10px}}
 @media(max-width:760px){.auth-shell{grid-template-columns:minmax(0,1fr);overflow:visible}.auth-brand-panel{min-height:auto;gap:36px;padding:22px 24px 26px}.auth-brand-copy{margin:0;padding:22px 0 8px}.auth-brand-copy h1{font-size:clamp(30px,8vw,42px)}.auth-brand-copy>p:last-child{margin-top:12px;font-size:12px}.auth-brand-foot{font-size:8px}.auth-panel{padding:34px 22px 40px}.auth-box{max-width:480px}}
 @media(max-width:420px){.auth-brand-panel{padding-inline:18px}.auth-panel{padding-inline:18px}.auth-tabs{margin-bottom:18px}.auth-form{gap:12px}}

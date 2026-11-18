@@ -9,10 +9,11 @@ class JobsPage:
         self.page.get_by_role("button", name="HireTest Jobs", exact=True).click()
         self.page.get_by_role("heading", name="HireTest Jobs.").wait_for()
 
-    def create_job(self, title: str, company: str, location: str, description: str):
+    def create_job(self, title: str, company: str, location: str, description: str, job_type: str = "Full time"):
         self.page.get_by_label("Job title").fill(title)
         self.page.get_by_label("Company").fill(company)
         self.page.get_by_label("Location").fill(location)
+        self.page.locator('select[name="type"]').select_option(label=job_type)
         self.page.get_by_label("Description").fill(description)
         self.page.get_by_role("button", name="Create job posting").click()
         expect(self.page.get_by_role("heading", name=title)).to_be_visible()
@@ -25,6 +26,7 @@ class JobsPage:
         card = self.page.locator(".job-card").filter(has=self.page.get_by_role("heading", name=title))
         card.get_by_role("button", name="View applicants").click()
         expect(self.page.get_by_role("heading", name=f"Applicants for {title}")).to_be_visible()
+        self.page.get_by_label("Search applicants").fill(student_name)
         expect(self.page.get_by_text(student_name)).to_be_visible()
         self.page.get_by_label(f"Status for {student_name}").select_option(status)
         expect(self.page.get_by_label(f"Status for {student_name}")).to_have_value(status)

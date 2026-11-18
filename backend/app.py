@@ -316,6 +316,7 @@ def create_app(test_config=None):
                 "type": job.get("type", "Full time"),
                 "description": job["description"],
                 "isDemo": job.get("is_demo", False),
+                "createdAt": job["created_at"].isoformat(),
             }
             for job in jobs
         ]})
@@ -332,9 +333,12 @@ def create_app(test_config=None):
             if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
                 return jsonify({"error": f"{field.title()} is required and must be {limit} characters or fewer."}), 400
             fields[field] = value.strip()
+        job_type = body.get("type", "Full time")
+        if not isinstance(job_type, str) or job_type not in {"Full time", "Part time", "Contract", "Internship"}:
+            return jsonify({"error": "Choose a valid job type."}), 400
         job = {
             **fields,
-            "type": body.get("type", "Full time"),
+            "type": job_type,
             "status": "published",
             "recruiter_id": g.user["_id"],
             "is_demo": False,
@@ -349,6 +353,7 @@ def create_app(test_config=None):
             "type": job["type"],
             "description": job["description"],
             "isDemo": False,
+            "createdAt": job["created_at"].isoformat(),
         }}), 201
 
     @app.get("/api/jobs/<job_id>")
@@ -366,6 +371,7 @@ def create_app(test_config=None):
             "type": job.get("type", "Full time"),
             "description": job["description"],
             "isDemo": job.get("is_demo", False),
+            "createdAt": job["created_at"].isoformat(),
         }})
 
     @app.post("/api/jobs/<job_id>/applications")
@@ -534,8 +540,53 @@ def create_app(test_config=None):
                 "expectedResult": expected,
                 "priority": priority,
                 "approved": False,
+                "isExample": False,
             })
         return jsonify({"generator": "rule-based", "testCases": test_cases}), 201
+
+    @app.patch("/api/test-cases/<case_id>")
+    @require_user()
+    def update_test_case(case_id):
+        if not ObjectId.is_valid(case_id):
+            return jsonify({"error": "Test case not found."}), 404
+        body, error = _json_body()
+        if error:
+            return error
+
+        updates = {}
+        for field, limit in (("title", 160), ("scenario", 2000), ("expectedResult", 2000)):
+            if field not in body:
+                continue
+            value = body[field]
+            if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
+                return jsonify({"error": f"{field} is required and must be {limit} characters or fewer."}), 400
+            updates[{"expectedResult": "expected_result"}.get(field, field)] = value.strip()
+        if "priority" in body:
+            if not isinstance(body["priority"], str) or body["priority"] not in {"High", "Medium", "Low"}:
+                return jsonify({"error": "Choose High, Medium, or Low priority."}), 400
+            updates["priority"] = body["priority"]
+        if "approved" in body:
+            if not isinstance(body["approved"], bool):
+                return jsonify({"error": "Approval must be true or false."}), 400
+            updates["approved"] = body["approved"]
+        if not updates:
+            return jsonify({"error": "Provide at least one test-case field to update."}), 400
+
+        database = _database()
+        case_filter = {"_id": ObjectId(case_id), "created_by": g.user["_id"]}
+        result = database["test_cases"].update_one(case_filter, {"$set": updates})
+        if result.matched_count == 0:
+            return jsonify({"error": "Test case not found."}), 404
+        case = database["test_cases"].find_one(case_filter)
+        return jsonify({"testCase": {
+            "id": str(case["_id"]),
+            "title": case["title"],
+            "scenario": case["scenario"],
+            "expectedResult": case["expected_result"],
+            "priority": case["priority"],
+            "approved": case["approved"],
+            "isExample": case.get("is_example", False),
+        }})
 
     @app.get("/api/test-cases")
     @require_user()
@@ -570,7 +621,11 @@ def create_app(test_config=None):
     @app.get("/")
     def frontend_index():
         if (frontend_dir / "index.html").is_file():
-            return send_from_directory(frontend_dir, "index.html")
+            response = send_from_directory(frontend_dir, "index.html")
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
         return jsonify({"message": "HireTest AI API is running. Build the frontend to serve the application."})
 
     @app.get("/<path:asset_path>")
@@ -579,9 +634,16 @@ def create_app(test_config=None):
             return jsonify({"error": "The requested resource was not found."}), 404
         requested = frontend_dir / asset_path
         if requested.is_file():
-            return send_from_directory(frontend_dir, asset_path)
+            response = send_from_directory(frontend_dir, asset_path)
+            if asset_path in {"sw.js", "registerSW.js"}:
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            return response
         if (frontend_dir / "index.html").is_file():
-            return send_from_directory(frontend_dir, "index.html")
+            response = send_from_directory(frontend_dir, "index.html")
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
         return jsonify({"error": "Frontend files are not available."}), 404
 
     return app

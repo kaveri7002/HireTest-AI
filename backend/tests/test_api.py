@@ -1,7 +1,28 @@
+from backend.app import create_app
+
+
 def test_health_reports_mongodb_connection(client):
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json == {"status": "ok", "database": "connected"}
+
+
+def test_frontend_shell_and_service_worker_disable_stale_caching(tmp_path):
+    (tmp_path / "index.html").write_text("<html>latest</html>", encoding="utf-8")
+    (tmp_path / "sw.js").write_text("self.skipWaiting()", encoding="utf-8")
+    application = create_app({
+        "TESTING": True,
+        "SECRET_KEY": "test-key-not-for-production",
+        "FRONTEND_DIST_DIR": str(tmp_path),
+    })
+    with application.test_client() as test_client:
+        page = test_client.get("/")
+        worker = test_client.get("/sw.js")
+
+    assert page.status_code == 200
+    assert "no-store" in page.headers["Cache-Control"]
+    assert worker.status_code == 200
+    assert "no-store" in worker.headers["Cache-Control"]
 
 
 def test_auth_register_login_and_role(client):
@@ -44,9 +65,12 @@ def test_job_creation_is_recruiter_only_and_listing_is_searchable(client, recrui
         "company": "Example Co",
         "location": "Remote",
         "description": "Test applications.",
+        "type": "Internship",
     })
     assert created.status_code == 201
     assert created.json["job"]["title"] == "QA Analyst"
+    assert created.json["job"]["type"] == "Internship"
+    assert "createdAt" in created.json["job"]
     listed = client.get("/api/jobs?search=example").json["jobs"]
     assert listed[0]["id"] == created.json["job"]["id"]
     assert not any(job["isDemo"] for job in listed)
@@ -92,10 +116,56 @@ def test_empty_test_case_workspace_gets_unapproved_starter_examples(client, stud
     assert client.get("/api/dashboard", headers=student_headers).json["total"] == 0
 
 
+def test_test_cases_can_be_edited_and_approved_only_by_their_owner(client, student_headers):
+    starter_cases = client.get("/api/test-cases", headers=student_headers).json["testCases"]
+    case_id = starter_cases[0]["id"]
+    updated = client.patch(f"/api/test-cases/{case_id}", headers=student_headers, json={
+        "title": "Updated starter test",
+        "scenario": "Run the revised sample scenario.",
+        "expectedResult": "The revised expected result is shown.",
+        "priority": "High",
+        "approved": True,
+    })
+    assert updated.status_code == 200
+    assert updated.json["testCase"]["title"] == "Updated starter test"
+    assert updated.json["testCase"]["expectedResult"] == "The revised expected result is shown."
+    assert updated.json["testCase"]["approved"] is True
+    assert updated.json["testCase"]["isExample"] is True
+
+    other_user_response = client.post("/api/auth/register", json={
+        "name": "Other Student",
+        "email": "other-student@example.test",
+        "password": "StrongPassword123",
+        "role": "student",
+    })
+    other_user_headers = {"Authorization": f"Bearer {other_user_response.json['token']}"}
+    assert client.patch(
+        f"/api/test-cases/{case_id}",
+        headers=other_user_headers,
+        json={"approved": False},
+    ).status_code == 404
+    assert client.patch(
+        f"/api/test-cases/{case_id}",
+        headers=student_headers,
+        json={"priority": "Urgent"},
+    ).status_code == 400
+    assert client.patch(
+        f"/api/test-cases/{case_id}",
+        headers=student_headers,
+        json={"priority": []},
+    ).status_code == 400
+    assert client.patch(
+        f"/api/test-cases/{case_id}",
+        headers=student_headers,
+        json={"approved": "yes"},
+    ).status_code == 400
+
+
 def test_database_backed_resources_require_authentication(client):
     assert client.get("/api/dashboard").status_code == 401
     assert client.get("/api/test-cases").status_code == 401
     assert client.post("/api/test-cases/generate", json={"requirement": "Login"}).status_code == 401
+    assert client.patch("/api/test-cases/507f1f77bcf86cd799439011", json={"approved": True}).status_code == 401
 
 
 def test_student_can_apply_once_and_recruiter_can_update_status(client, recruiter_headers):

@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
-  Activity, ArrowUpRight, BriefcaseBusiness, Bug,
+  Activity, ArrowUpRight, Bookmark, BriefcaseBusiness, Bug,
   CheckCircle2, ChevronDown, CircleHelp, Clock3, FileCheck2, FlaskConical,
   LayoutDashboard, ListChecks, Menu, Plus, Search, Settings2, ShieldCheck,
-  Sparkles, X,
+  Sparkles, X, Pencil,
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -25,6 +25,7 @@ type Job = {
   type: string
   description: string
   isDemo: boolean
+  createdAt: string
 }
 
 type StudentApplication = {
@@ -68,6 +69,7 @@ function App() {
   const [page, setPage] = useState<PageId>('command')
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
+  const [savedJobIds, setSavedJobIds] = useState<string[]>([])
   const [myApplications, setMyApplications] = useState<StudentApplication[]>([])
   const [applicants, setApplicants] = useState<Applicant[]>([])
   const [applicantsForJob, setApplicantsForJob] = useState('')
@@ -156,6 +158,57 @@ function App() {
     }
   }
 
+  function toggleSavedJob(jobId: string) {
+    if (!user) return
+    const next = savedJobIds.includes(jobId)
+      ? savedJobIds.filter((id) => id !== jobId)
+      : [...savedJobIds, jobId]
+    try {
+      localStorage.setItem(`hiretest-saved-jobs:${user.id}`, JSON.stringify(next))
+      setSavedJobIds(next)
+      setNotice('')
+    } catch {
+      setNotice('Saved jobs could not be stored on this device.')
+    }
+  }
+
+  async function updateTestCase(caseId: string, changes: Partial<TestCase>) {
+    setNotice('')
+    try {
+      const response = await fetch(`${API_URL}/api/test-cases/${caseId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(changes),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not update the test case.')
+      setCases((current) => current.map((testCase) => (
+        testCase.id === caseId ? body.testCase : testCase
+      )))
+      return true
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not update the test case.')
+      return false
+    }
+  }
+
+  useEffect(() => {
+    if (!user) {
+      setSavedJobIds([])
+      return
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(`hiretest-saved-jobs:${user.id}`) || '[]')
+      if (!Array.isArray(saved) || !saved.every((id) => typeof id === 'string')) {
+        throw new Error('Saved jobs data is invalid.')
+      }
+      setSavedJobIds(saved)
+    } catch {
+      setSavedJobIds([])
+      setNotice('Saved jobs could not be loaded from this device.')
+    }
+  }, [user?.id])
+
   useEffect(() => {
     if (!token) {
       setAuthChecking(false)
@@ -222,7 +275,7 @@ function App() {
           company: formData.get('company'),
           location: formData.get('location'),
           description: formData.get('description'),
-          type: 'Full time',
+          type: formData.get('type'),
         }),
       })
       const body = await response.json()
@@ -359,8 +412,8 @@ function App() {
         <div className="page-content">
           {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss message"><X size={16} /></button></div>}
           {page === 'command' && <CommandCenter dashboard={dashboard} passedPercent={passedPercent} onNavigate={setPage} />}
-          {page === 'jobs' && <JobsPage jobs={jobs} search={jobSearch} setSearch={setJobSearch} onSearch={() => void loadJobs()} loading={loadingJobs} onCreate={createDemoJob} onApply={applyToJob} busy={busy} user={user} myApplications={myApplications} applicants={applicants} applicantsForJob={applicantsForJob} onViewApplicants={loadApplicants} onUpdateApplication={updateApplicationStatus} />}
-          {page === 'cases' && <CasesPage cases={cases} requirement={requirement} setRequirement={setRequirement} onGenerate={generateCases} busy={busy} />}
+          {page === 'jobs' && <JobsPage jobs={jobs} search={jobSearch} setSearch={setJobSearch} onSearch={() => void loadJobs()} loading={loadingJobs} onCreate={createDemoJob} onApply={applyToJob} busy={busy} user={user} myApplications={myApplications} applicants={applicants} applicantsForJob={applicantsForJob} onViewApplicants={loadApplicants} onUpdateApplication={updateApplicationStatus} savedJobIds={savedJobIds} onToggleSavedJob={toggleSavedJob} />}
+          {page === 'cases' && <CasesPage cases={cases} requirement={requirement} setRequirement={setRequirement} onGenerate={generateCases} onUpdate={updateTestCase} busy={busy} />}
           {page === 'executions' && <EmptyPage title="Test executions" icon={<Activity size={20} />} description="Execution history will appear here after the Playwright worker is configured." />}
           {page === 'bugs' && <EmptyPage title="Bug reports" icon={<Bug size={20} />} description="Failed assertions will create bug reports in a later phase. No results are fabricated." />}
         </div>
@@ -450,38 +503,109 @@ function CommandCenter({ dashboard, passedPercent, onNavigate }: { dashboard: Da
   )
 }
 
-function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onApply, busy, user, myApplications, applicants, applicantsForJob, onViewApplicants, onUpdateApplication }: { jobs: Job[]; search: string; setSearch: (value: string) => void; onSearch: () => void; loading: boolean; onCreate: (event: FormEvent<HTMLFormElement>) => void; onApply: (jobId: string) => void; busy: boolean; user: User; myApplications: StudentApplication[]; applicants: Applicant[]; applicantsForJob: string; onViewApplicants: (jobId: string) => void; onUpdateApplication: (applicationId: string, status: string) => void }) {
+function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onApply, busy, user, myApplications, applicants, applicantsForJob, onViewApplicants, onUpdateApplication, savedJobIds, onToggleSavedJob }: { jobs: Job[]; search: string; setSearch: (value: string) => void; onSearch: () => void; loading: boolean; onCreate: (event: FormEvent<HTMLFormElement>) => void; onApply: (jobId: string) => void; busy: boolean; user: User; myApplications: StudentApplication[]; applicants: Applicant[]; applicantsForJob: string; onViewApplicants: (jobId: string) => void; onUpdateApplication: (applicationId: string, status: string) => void; savedJobIds: string[]; onToggleSavedJob: (jobId: string) => void }) {
+  const [typeFilter, setTypeFilter] = useState('All job types')
+  const [sortOrder, setSortOrder] = useState('newest')
+  const [showSavedOnly, setShowSavedOnly] = useState(false)
+  const [applicantSearch, setApplicantSearch] = useState('')
+  const [applicantStatus, setApplicantStatus] = useState('all')
+  const jobTypes = [...new Set(jobs.map((job) => job.type))]
+  const visibleJobs = jobs
+    .filter((job) => typeFilter === 'All job types' || job.type === typeFilter)
+    .filter((job) => !showSavedOnly || savedJobIds.includes(job.id))
+    .sort((first, second) => {
+      if (sortOrder === 'title') return first.title.localeCompare(second.title)
+      const direction = sortOrder === 'oldest' ? 1 : -1
+      return direction * (Date.parse(first.createdAt) - Date.parse(second.createdAt))
+    })
+
   return (
     <>
       <section className="welcome-row">
         <div><p className="eyebrow">APPLICATION UNDER TEST</p><h1>HireTest <em>Jobs.</em></h1><p className="welcome-subtitle">Browse listings and explore the job application workflow. Demo listings are fictional and cannot accept applications.</p></div>
         <span className="aut-badge"><span /> LIVE APPLICATION</span>
       </section>
-      <section className="jobs-toolbar panel"><div className="search-field"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') onSearch() }} placeholder="Search role, company, or location" aria-label="Search jobs" /><button onClick={onSearch}>Search</button></div><button className="button button-secondary"><ChevronDown size={15} /> All job types</button></section>
+      <section className="jobs-toolbar panel">
+        <div className="search-field"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') onSearch() }} placeholder="Search role, company, or location" aria-label="Search jobs" /><button onClick={onSearch}>Search</button></div>
+        <div className="job-filter-controls">
+          <label className="visually-hidden" htmlFor="job-type-filter">Filter by job type</label>
+          <select id="job-type-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <option>All job types</option>
+            {jobTypes.map((type) => <option key={type}>{type}</option>)}
+          </select>
+          <label className="visually-hidden" htmlFor="job-sort">Sort jobs</label>
+          <select id="job-sort" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+            <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title A–Z</option>
+          </select>
+          {user.role === 'student' && <button className={`button ${showSavedOnly ? 'button-primary' : 'button-secondary'}`} onClick={() => setShowSavedOnly((current) => !current)}><Bookmark size={15} /> Saved ({savedJobIds.length})</button>}
+        </div>
+      </section>
       <div className="jobs-layout">
         <section className="job-results">
-          <div className="section-title"><h2>Open roles</h2><span>{jobs.length} listed</span></div>
-          {loading ? <div className="panel table-empty">Loading job listings…</div> : jobs.length ? jobs.map((job) => {
+          <div className="section-title"><h2>{showSavedOnly ? 'Saved jobs' : 'Open roles'}</h2><span>{visibleJobs.length} listed</span></div>
+          {loading ? <div className="panel table-empty">Loading job listings…</div> : visibleJobs.length ? visibleJobs.map((job) => {
             const application = myApplications.find((item) => item.job.id === job.id)
+            const isSaved = savedJobIds.includes(job.id)
             return <div key={job.id}>
-              <article className="panel job-card"><div className="company-mark">{job.company.slice(0, 1).toUpperCase()}</div><div className="job-copy"><div className="job-title-row"><h3>{job.title}</h3><span className="job-type">{job.type}</span>{job.isDemo && <span className="demo-label">DEMO ONLY</span>}</div><p>{job.company} <span>·</span> {job.location}</p><small>{job.description}</small></div>{user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => onApply(job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : 'Apply'}</button> : <button className="button button-secondary" disabled={job.isDemo} onClick={() => onViewApplicants(job.id)}>{job.isDemo ? 'Sample only' : 'View applicants'}</button>}</article>
-              {user.role === 'recruiter' && applicantsForJob === job.id && <section className="panel applicant-list"><h3>Applicants for {job.title}</h3>{applicants.length ? applicants.map((applicant) => <div className="applicant-row" key={applicant.id}><div><strong>{applicant.student.name}</strong><span>{applicant.student.email}</span></div><select aria-label={`Status for ${applicant.student.name}`} value={applicant.status} onChange={(event) => onUpdateApplication(applicant.id, event.target.value)}><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>) : <p>No applications have been submitted for this role yet.</p>}</section>}
+              <article className="panel job-card">
+                <div className="company-mark">{job.company.slice(0, 1).toUpperCase()}</div>
+                <div className="job-copy">
+                  <div className="job-title-row"><h3>{job.title}</h3><span className="job-type">{job.type}</span>{job.isDemo && <span className="demo-label">DEMO ONLY</span>}</div>
+                  <p>{job.company} <span>·</span> {job.location}</p><small>{job.description}</small>
+                </div>
+                {user.role === 'student' && <button className={`save-job-button ${isSaved ? 'saved' : ''}`} aria-label={isSaved ? `Remove ${job.title} from saved jobs` : `Save ${job.title}`} title={isSaved ? 'Remove from saved jobs' : 'Save job'} onClick={() => onToggleSavedJob(job.id)}><Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} /></button>}
+                {user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => onApply(job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : 'Apply'}</button> : <button className="button button-secondary" disabled={job.isDemo} onClick={() => onViewApplicants(job.id)}>{job.isDemo ? 'Sample only' : 'View applicants'}</button>}
+              </article>
+              {user.role === 'recruiter' && applicantsForJob === job.id && <section className="panel applicant-list">
+                <div className="applicant-heading"><h3>Applicants for {job.title}</h3><span>{applicants.length} total</span></div>
+                <div className="applicant-filters"><input aria-label="Search applicants" placeholder="Search name or email" value={applicantSearch} onChange={(event) => setApplicantSearch(event.target.value)} /><select aria-label="Filter applicants by status" value={applicantStatus} onChange={(event) => setApplicantStatus(event.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>
+                {applicants.length ? applicants.filter((applicant) => applicant.status === applicantStatus || applicantStatus === 'all').filter((applicant) => `${applicant.student.name} ${applicant.student.email}`.toLowerCase().includes(applicantSearch.trim().toLowerCase())).map((applicant) => <div className="applicant-row" key={applicant.id}><div><strong>{applicant.student.name}</strong><span>{applicant.student.email}</span></div><select aria-label={`Status for ${applicant.student.name}`} value={applicant.status} onChange={(event) => onUpdateApplication(applicant.id, event.target.value)}><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>) : <p>No applications have been submitted for this role yet.</p>}
+                {applicants.length > 0 && applicants.filter((applicant) => applicant.status === applicantStatus || applicantStatus === 'all').filter((applicant) => `${applicant.student.name} ${applicant.student.email}`.toLowerCase().includes(applicantSearch.trim().toLowerCase())).length === 0 && <p>No applicants match these filters.</p>}
+              </section>}
             </div>
-          }) : <div className="panel job-empty"><div className="empty-icon"><BriefcaseBusiness size={20} /></div><strong>No jobs found</strong><span>Job listings come from the configured database. Add a real listing below.</span></div>}
+          }) : <div className="panel job-empty"><div className="empty-icon"><BriefcaseBusiness size={20} /></div><strong>{showSavedOnly ? 'No saved jobs' : 'No jobs found'}</strong><span>{showSavedOnly ? 'Use the bookmark button on a listing to save it here.' : 'Try another job type or search, or add a real listing below.'}</span></div>}
         </section>
         {user.role === 'student' && <section className="panel my-applications"><div className="panel-heading"><div><h2>My applications</h2><p>Current status of your submitted applications.</p></div><span>{myApplications.length}</span></div>{myApplications.length ? myApplications.map((application) => <div className="applicant-row" key={application.id}><div><strong>{application.job.title}</strong><span>{application.job.company}</span></div><span className="job-type">{application.status}</span></div>) : <p>You have not applied to any jobs yet.</p>}</section>}
-        <aside className="panel job-create-panel"><div className="panel-heading"><div><h2>Recruiter quick post</h2><p>Job publishing requires a recruiter account.</p></div></div>{user.role === 'recruiter' ? <form className="quick-form" onSubmit={onCreate}><label>Job title<input required name="title" maxLength={120} placeholder="e.g. QA Engineer" /></label><label>Company<input required name="company" maxLength={120} placeholder="Your company" /></label><label>Location<input required name="location" maxLength={120} placeholder="City or remote" /></label><label>Description<textarea required name="description" maxLength={5000} rows={3} placeholder="What will this person do?" /></label><button className="button button-primary" disabled={busy}><Plus size={16} /> {busy ? 'Saving…' : 'Create job posting'}</button></form> : <div className="role-note"><BriefcaseBusiness size={18} /><p>Sign in with a recruiter account to publish job listings. Student applicants can browse listings.</p></div>}</aside>
+        <aside className="panel job-create-panel"><div className="panel-heading"><div><h2>Recruiter quick post</h2><p>Job publishing requires a recruiter account.</p></div></div>{user.role === 'recruiter' ? <form className="quick-form" onSubmit={onCreate}><label>Job title<input required name="title" maxLength={120} placeholder="e.g. QA Engineer" /></label><label>Company<input required name="company" maxLength={120} placeholder="Your company" /></label><label>Location<input required name="location" maxLength={120} placeholder="City or remote" /></label><label>Job type<select name="type"><option>Full time</option><option>Part time</option><option>Contract</option><option>Internship</option></select></label><label>Description<textarea required name="description" maxLength={5000} rows={3} placeholder="What will this person do?" /></label><button className="button button-primary" disabled={busy}><Plus size={16} /> {busy ? 'Saving…' : 'Create job posting'}</button></form> : <div className="role-note"><BriefcaseBusiness size={18} /><p>Sign in with a recruiter account to publish job listings. Student applicants can browse listings.</p></div>}</aside>
       </div>
     </>
   )
 }
 
-function CasesPage({ cases, requirement, setRequirement, onGenerate, busy }: { cases: TestCase[]; requirement: string; setRequirement: (value: string) => void; onGenerate: (event: React.FormEvent<HTMLFormElement>) => void; busy: boolean }) {
+function CasesPage({ cases, requirement, setRequirement, onGenerate, onUpdate, busy }: { cases: TestCase[]; requirement: string; setRequirement: (value: string) => void; onGenerate: (event: React.FormEvent<HTMLFormElement>) => void; onUpdate: (caseId: string, changes: Partial<TestCase>) => Promise<boolean>; busy: boolean }) {
+  const [editing, setEditing] = useState<TestCase | null>(null)
+
+  async function saveCase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editing) return
+    const formData = new FormData(event.currentTarget)
+    const priority = formData.get('priority')
+    if (priority !== 'High' && priority !== 'Medium' && priority !== 'Low') return
+    const saved = await onUpdate(editing.id, {
+      title: String(formData.get('title')),
+      scenario: String(formData.get('scenario')),
+      expectedResult: String(formData.get('expectedResult')),
+      priority,
+    })
+    if (saved) setEditing(null)
+  }
+
   return (
     <>
       <section className="welcome-row"><div><p className="eyebrow">SAFE TEST DESIGN</p><h1>Test case <em>generator.</em></h1><p className="welcome-subtitle">Turn a plain-English requirement into reviewable test scenarios.</p></div><span className="aut-badge"><Sparkles size={14} /> RULE-BASED FALLBACK</span></section>
       <section className="panel generator-panel"><div className="generator-icon"><Sparkles size={20} /></div><div className="generator-copy"><h2>Describe what should work</h2><p>Test cases are structured data, not executable generated code. AI integration can be configured later.</p><form className="generator-form" onSubmit={onGenerate}><textarea value={requirement} onChange={(event) => setRequirement(event.target.value)} placeholder="Example: Students can sign in using a valid email address and password." rows={3} required /><button className="button button-primary" disabled={busy}><Sparkles size={16} /> {busy ? 'Generating…' : 'Generate test cases'}</button></form></div></section>
-      <section className="panel case-list-panel"><div className="panel-heading"><div><h2>Generated test cases</h2><p>{cases.length} in your workspace · review before execution</p></div><button className="button button-secondary" disabled={!cases.length}>Select all</button></div>{cases.length ? <div className="case-list">{cases.map((testCase) => <article className="case-card" key={testCase.id}><div className="case-check"><input type="checkbox" aria-label={`Select ${testCase.title}`} /></div><div className="case-main"><div className="case-meta"><span className="case-id">{testCase.id}</span><span className={`priority-pill priority-${testCase.priority.toLowerCase()}`}>{testCase.priority}</span><span className="case-type">{testCase.isExample ? 'Starter example' : 'Functional'}</span></div><h3>{testCase.title}</h3><p>{testCase.scenario}</p><div className="expected"><strong>Expected result</strong><span>{testCase.expectedResult}</span></div></div><button className={`approval-badge ${testCase.approved ? 'approved' : ''}`}>{testCase.approved ? 'Approved' : 'Review'}</button></article>)}</div> : <div className="job-empty"><div className="empty-icon"><ListChecks size={20} /></div><strong>No test cases yet</strong><span>Starter examples will appear here. Generate more from a requirement above.</span></div>}</section>
+      <section className="panel case-list-panel"><div className="panel-heading"><div><h2>Test cases</h2><p>{cases.length} in your workspace · review and approve before execution</p></div></div>{cases.length ? <div className="case-list">{cases.map((testCase) => <article className="case-card" key={testCase.id}>
+        {editing?.id === testCase.id ? <form className="case-edit-form" onSubmit={saveCase}>
+          <label>Title<input name="title" required maxLength={160} defaultValue={testCase.title} /></label>
+          <label>Scenario<textarea name="scenario" required maxLength={2000} rows={2} defaultValue={testCase.scenario} /></label>
+          <label>Expected result<textarea name="expectedResult" required maxLength={2000} rows={2} defaultValue={testCase.expectedResult} /></label>
+          <label>Priority<select name="priority" defaultValue={testCase.priority}><option>High</option><option>Medium</option><option>Low</option></select></label>
+          <div className="case-edit-actions"><button className="button button-primary" type="submit">Save changes</button><button className="button button-secondary" type="button" onClick={() => setEditing(null)}>Cancel</button></div>
+        </form> : <>
+          <div className="case-main"><div className="case-meta"><span className={`priority-pill priority-${testCase.priority.toLowerCase()}`}>{testCase.priority}</span><span className="case-type">{testCase.isExample ? 'Starter example' : 'Functional'}</span></div><h3>{testCase.title}</h3><p>{testCase.scenario}</p><div className="expected"><strong>Expected result</strong><span>{testCase.expectedResult}</span></div></div>
+          <div className="case-actions"><button className={`approval-badge ${testCase.approved ? 'approved' : ''}`} onClick={() => void onUpdate(testCase.id, { approved: !testCase.approved })}>{testCase.approved ? 'Approved' : 'Approve'}</button><button className="icon-button" aria-label={`Edit ${testCase.title}`} title="Edit test case" onClick={() => setEditing(testCase)}><Pencil size={15} /></button></div>
+        </>}
+      </article>)}</div> : <div className="job-empty"><div className="empty-icon"><ListChecks size={20} /></div><strong>No test cases yet</strong><span>Starter examples will appear here. Generate more from a requirement above.</span></div>}</section>
     </>
   )
 }
