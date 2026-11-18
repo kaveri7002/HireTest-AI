@@ -101,4 +101,6 @@ The Playwright end-to-end test exercises the actual job portal and records no sy
 
 ## GitHub and deployment
 
-This folder is separate from the existing TaskFlow QA repository content. No GitHub repository has been selected or authorized for HireTest AI yet, so this project has not been pushed or deployed. Configure staging separately before using defect injection; there is no production defect injection in the current phase.
+This project is published at [github.com/kaveri7002/HireTest-AI](https://github.com/kaveri7002/HireTest-AI). It includes a Render Blueprint (`render.yaml`) and a multi-stage Dockerfile for deploying the frontend and API as one web service.
+
+To deploy, create a new Blueprint from this repository in Render and apply the `hiretest-ai` service. During setup, enter `MONGODB_URI` in Render's private environment-variable prompt using your own MongoDB Atlas connection string; do not put credentials in the repository or chat. Render generates `SECRET_KEY` automatically. The site can load without a database URI, but account and data APIs will return a configuration error until MongoDB is configured. Configure Atlas Network Access to allow the Render service to connect. The free Render service may sleep when idle. Configure staging separately before using defect injection; there is no production defect injection in the current phase.
