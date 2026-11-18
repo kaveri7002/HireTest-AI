@@ -1,0 +1,16 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+dist/
+frontend/dist/
+playwright-report/
+test-results/
+artifacts/
+*.log
+.DS_Store
