@@ -1,8 +1,8 @@
-FROM node:20-alpine AS frontend
+FROM node:20-slim AS frontend
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --include=optional
 COPY frontend/ ./
 RUN npm run build
 
