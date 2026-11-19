@@ -1,6 +1,6 @@
 # backend/app/__init__.py
 """Flask application factory for HireTest AI backend.
-Creates the Flask app, registers extensions and blueprints.
+Creates the Flask app, registers extensions.
 """
 
 from flask import Flask
@@ -37,10 +37,16 @@ def create_app() -> Flask:
     celery = Celery(app.import_name, broker=app.config["CELERY_BROKER_URL"], backend=app.config["CELERY_RESULT_BACKEND"])
     celery.conf.update(app.config)
 
+    # Register blueprints
+    from .auth import auth_bp
+    from .protected import protected_bp
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(protected_bp)
+
     # Register a simple health route
     @app.get("/health")
     def health():
         return {"status": "ok"}
 
-    # TODO: Register blueprints for auth, students, recruiters, jobs, testing, etc.
+    # TODO: Register other blueprints (students, recruiters, jobs, testing, etc.)
     return app
