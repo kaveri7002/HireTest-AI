@@ -1,0 +1,8 @@
+flask
+flask-socketio
+pymongo
+redis
+celery
+python-dotenv
+Werkzeug==2.3.8
+eventlet
