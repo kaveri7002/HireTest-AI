@@ -4,11 +4,12 @@ import secrets
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from flask import Flask, current_app, g, jsonify, request, send_from_directory
 from flask_cors import CORS
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from bson import ObjectId
 from pymongo import MongoClient
@@ -48,6 +49,39 @@ def _json_body():
 
 def _user_payload(user):
     return {"id": str(user["_id"]), "name": user["name"], "email": user["email"], "role": user["role"]}
+
+
+def _notification_payload(notification):
+    return {
+        "id": str(notification["_id"]),
+        "title": notification["title"],
+        "message": notification["message"],
+        "kind": notification["kind"],
+        "createdAt": notification["created_at"].isoformat(),
+        "read": notification.get("read", False),
+        "applicationId": notification.get("application_id"),
+    }
+
+
+def _notify_user(database, user_id, title, message, kind, application_id=None):
+    notification = {
+        "user_id": user_id,
+        "title": title,
+        "message": message,
+        "kind": kind,
+        "created_at": _utc_now(),
+        "read": False,
+        "application_id": application_id,
+    }
+    result = database["notifications"].insert_one(notification)
+    notification["_id"] = result.inserted_id
+    socketio.emit("notification", _notification_payload(notification), to=f"user:{user_id}")
+
+
+def _job_match(job, keywords):
+    searchable = f'{job["title"]} {job["description"]} {job["location"]}'.lower()
+    matches = [keyword for keyword in keywords if keyword in searchable]
+    return len(matches), matches
 
 
 def _seed_demo_jobs(database):
@@ -125,6 +159,21 @@ def _authorized_user():
         return None
 
 
+@socketio.on("connect")
+def authorize_socket(auth=None):
+    token = auth.get("token") if isinstance(auth, dict) else None
+    if not isinstance(token, str):
+        return False
+    try:
+        user_id = _serializer().loads(token, max_age=current_app.config["TOKEN_MAX_AGE_SECONDS"])
+        user = _database()["users"].find_one({"_id": ObjectId(user_id)})
+    except (BadSignature, SignatureExpired, ValueError, PyMongoError):
+        return False
+    if user is None:
+        return False
+    join_room(f"user:{user['_id']}")
+
+
 def require_user(*roles):
     def decorator(handler):
         @wraps(handler)
@@ -180,6 +229,7 @@ def create_app(test_config=None):
             database["jobs"].create_index([("status", 1), ("created_at", -1)])
             database["jobs"].create_index("demo_key", unique=True, sparse=True)
             database["applications"].create_index([("student_id", 1), ("job_id", 1)], unique=True)
+            database["notifications"].create_index([("user_id", 1), ("created_at", -1)])
             database["test_cases"].create_index([("created_by", 1), ("created_at", -1)])
             database["test_cases"].create_index(
                 [("created_by", 1), ("sample_key", 1)],
@@ -293,6 +343,37 @@ def create_app(test_config=None):
     def me():
         return jsonify({"user": _user_payload(g.user)})
 
+    @app.get("/api/profile")
+    @require_user("student")
+    def get_student_profile():
+        return jsonify({"profile": {
+            "skills": g.user.get("skills", []),
+            "interests": g.user.get("interests", ""),
+        }})
+
+    @app.put("/api/profile")
+    @require_user("student")
+    def update_student_profile():
+        body, error = _json_body()
+        if error:
+            return error
+        skills = body.get("skills", [])
+        interests = body.get("interests", "")
+        if (
+            not isinstance(skills, list)
+            or len(skills) > 30
+            or any(not isinstance(skill, str) or not skill.strip() or len(skill.strip()) > 40 for skill in skills)
+        ):
+            return jsonify({"error": "Enter up to 30 skills, each 40 characters or fewer."}), 400
+        if not isinstance(interests, str) or len(interests.strip()) > 1000:
+            return jsonify({"error": "Interests must be 1,000 characters or fewer."}), 400
+        clean_skills = list(dict.fromkeys(skill.strip() for skill in skills))
+        _database()["users"].update_one(
+            {"_id": g.user["_id"]},
+            {"$set": {"skills": clean_skills, "interests": interests.strip()}},
+        )
+        return jsonify({"profile": {"skills": clean_skills, "interests": interests.strip()}})
+
     @app.get("/api/jobs")
     def list_jobs():
         database = _database()
@@ -320,6 +401,46 @@ def create_app(test_config=None):
             }
             for job in jobs
         ]})
+
+    @app.get("/api/job-recommendations")
+    @require_user("student")
+    def recommend_jobs():
+        database = _database()
+        profile = database["users"].find_one(
+            {"_id": g.user["_id"]},
+            {"skills": 1, "interests": 1},
+        ) or {}
+        keywords = [
+            item.lower()
+            for item in (profile.get("skills", []) + re.split(r"[,;\n]+", profile.get("interests", "")))
+            if isinstance(item, str) and len(item.strip()) >= 2
+        ]
+        keywords = list(dict.fromkeys(keywords))
+        if not keywords:
+            return jsonify({"recommendations": [], "message": "Add skills or interests to your profile to get job suggestions."})
+
+        jobs = database["jobs"].find({"status": "published", "is_demo": {"$ne": True}}).limit(100)
+        recommendations = []
+        for job in jobs:
+            match_count, matches = _job_match(job, keywords)
+            if match_count == 0:
+                continue
+            recommendations.append({
+                "job": {
+                    "id": str(job["_id"]),
+                    "title": job["title"],
+                    "company": job["company"],
+                    "location": job["location"],
+                    "type": job.get("type", "Full time"),
+                    "description": job["description"],
+                    "isDemo": False,
+                    "createdAt": job["created_at"].isoformat(),
+                },
+                "matchScore": min(100, round(100 * match_count / len(keywords))),
+                "matchedSkills": matches[:5],
+            })
+        recommendations.sort(key=lambda item: (-item["matchScore"], item["job"]["title"].lower()))
+        return jsonify({"recommendations": recommendations[:10], "message": None})
 
     @app.post("/api/jobs")
     @require_user("recruiter")
@@ -385,9 +506,48 @@ def create_app(test_config=None):
             return jsonify({"error": "Job not found."}), 404
         if job.get("is_demo"):
             return jsonify({"error": "Demo listings are for browsing only and cannot accept applications."}), 409
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({"error": "Send application information as a JSON object."}), 400
+        applicant_name = body.get("name", g.user["name"])
+        applicant_email = body.get("email", g.user["email"])
+        phone = body.get("phone", "")
+        skills = body.get("skills", [])
+        cover_letter = body.get("coverLetter", "")
+        resume_url = body.get("resumeUrl", "")
+        if not isinstance(applicant_name, str) or not applicant_name.strip() or len(applicant_name.strip()) > 80:
+            return jsonify({"error": "Enter your name (80 characters or fewer)."}), 400
+        if (
+            not isinstance(applicant_email, str)
+            or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", applicant_email.strip())
+            or len(applicant_email) > 254
+        ):
+            return jsonify({"error": "Enter a valid contact email address."}), 400
+        if not isinstance(phone, str) or len(phone) > 30 or (phone and not re.fullmatch(r"[+\d() .-]{7,30}", phone)):
+            return jsonify({"error": "Enter a valid phone number or leave it blank."}), 400
+        if (
+            not isinstance(skills, list)
+            or len(skills) > 30
+            or any(not isinstance(skill, str) or not skill.strip() or len(skill.strip()) > 40 for skill in skills)
+        ):
+            return jsonify({"error": "Enter up to 30 skills, each 40 characters or fewer."}), 400
+        if not isinstance(cover_letter, str) or len(cover_letter) > 3000:
+            return jsonify({"error": "Cover note must be 3,000 characters or fewer."}), 400
+        if not isinstance(resume_url, str) or len(resume_url) > 2048:
+            return jsonify({"error": "Resume link must be 2,048 characters or fewer."}), 400
+        if resume_url:
+            parsed_resume_url = urlparse(resume_url)
+            if parsed_resume_url.scheme != "https" or not parsed_resume_url.netloc:
+                return jsonify({"error": "Resume link must be a valid HTTPS URL."}), 400
         application = {
             "job_id": job["_id"],
             "student_id": g.user["_id"],
+            "applicant_name": applicant_name.strip(),
+            "applicant_email": applicant_email.strip().lower(),
+            "phone": phone.strip(),
+            "skills": list(dict.fromkeys(skill.strip() for skill in skills)),
+            "cover_letter": cover_letter.strip(),
+            "resume_url": resume_url.strip(),
             "status": "submitted",
             "created_at": _utc_now(),
             "updated_at": _utc_now(),
@@ -396,6 +556,14 @@ def create_app(test_config=None):
             result = database["applications"].insert_one(application)
         except DuplicateKeyError:
             return jsonify({"error": "You have already applied for this job."}), 409
+        _notify_user(
+            database,
+            job["recruiter_id"],
+            "New job application",
+            f'{application["applicant_name"]} applied for {job["title"]}.',
+            "application",
+            str(result.inserted_id),
+        )
         return jsonify({"application": {
             "id": str(result.inserted_id),
             "jobId": str(job["_id"]),
@@ -426,6 +594,7 @@ def create_app(test_config=None):
                 },
                 "status": application["status"],
                 "createdAt": application["created_at"].isoformat(),
+                "interview": application.get("interview"),
             }
             for application in applications
             if application["job_id"] in jobs_by_id
@@ -450,11 +619,16 @@ def create_app(test_config=None):
                 "id": str(application["_id"]),
                 "student": {
                     "id": str(users[application["student_id"]]["_id"]),
-                    "name": users[application["student_id"]]["name"],
-                    "email": users[application["student_id"]]["email"],
+                    "name": application.get("applicant_name", users[application["student_id"]]["name"]),
+                    "email": application.get("applicant_email", users[application["student_id"]]["email"]),
                 },
+                "phone": application.get("phone", ""),
+                "skills": application.get("skills", []),
+                "coverLetter": application.get("cover_letter", ""),
+                "resumeUrl": application.get("resume_url", ""),
                 "status": application["status"],
                 "createdAt": application["created_at"].isoformat(),
+                "interview": application.get("interview"),
             }
             for application in applications
             if application["student_id"] in users
@@ -469,8 +643,8 @@ def create_app(test_config=None):
         if error:
             return error
         status = body.get("status")
-        if not isinstance(status, str) or status not in {"reviewing", "shortlisted", "rejected", "hired"}:
-            return jsonify({"error": "Choose reviewing, shortlisted, rejected, or hired."}), 400
+        if not isinstance(status, str) or status not in {"reviewing", "shortlisted", "interview", "rejected", "hired"}:
+            return jsonify({"error": "Choose reviewing, shortlisted, interview, rejected, or hired."}), 400
         database = _database()
         application = database["applications"].find_one({"_id": ObjectId(application_id)})
         if application is None:
@@ -482,7 +656,92 @@ def create_app(test_config=None):
             {"_id": application["_id"]},
             {"$set": {"status": status, "updated_at": _utc_now()}},
         )
+        if application["status"] != status:
+            _notify_user(
+                database,
+                application["student_id"],
+                "Application status updated",
+                f'Your application for {job["title"]} is now {status}.',
+                "application_status",
+                application_id,
+            )
         return jsonify({"application": {"id": application_id, "status": status}})
+
+    @app.post("/api/applications/<application_id>/interview")
+    @require_user("recruiter")
+    def schedule_interview(application_id):
+        if not ObjectId.is_valid(application_id):
+            return jsonify({"error": "Application not found."}), 404
+        body, error = _json_body()
+        if error:
+            return error
+        interview_at = body.get("scheduledAt")
+        meeting_url = body.get("meetingUrl", "")
+        if not isinstance(interview_at, str):
+            return jsonify({"error": "Choose an interview date and time."}), 400
+        try:
+            scheduled_at = datetime.fromisoformat(interview_at.replace("Z", "+00:00"))
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+            scheduled_at = scheduled_at.astimezone(timezone.utc)
+        except ValueError:
+            return jsonify({"error": "Enter a valid interview date and time."}), 400
+        if scheduled_at <= _utc_now():
+            return jsonify({"error": "Interview must be scheduled for a future date and time."}), 400
+        if not isinstance(meeting_url, str) or len(meeting_url) > 2048:
+            return jsonify({"error": "Meeting link must be 2,048 characters or fewer."}), 400
+        if meeting_url:
+            parsed_meeting_url = urlparse(meeting_url)
+            if parsed_meeting_url.scheme != "https" or not parsed_meeting_url.netloc:
+                return jsonify({"error": "Meeting link must be a valid HTTPS URL."}), 400
+
+        database = _database()
+        application = database["applications"].find_one({"_id": ObjectId(application_id)})
+        if application is None:
+            return jsonify({"error": "Application not found."}), 404
+        job = database["jobs"].find_one({"_id": application["job_id"], "recruiter_id": g.user["_id"]})
+        if job is None:
+            return jsonify({"error": "Application not found."}), 404
+        interview = {
+            "scheduledAt": scheduled_at.isoformat(),
+            "meetingUrl": meeting_url.strip(),
+        }
+        database["applications"].update_one(
+            {"_id": application["_id"]},
+            {"$set": {"interview": interview, "status": "interview", "updated_at": _utc_now()}},
+        )
+        local_time = scheduled_at.strftime("%b %d, %Y at %H:%M UTC")
+        message = f'Your interview for {job["title"]} is scheduled for {local_time}.'
+        if meeting_url:
+            message += f" Meeting link: {meeting_url.strip()}"
+        _notify_user(database, application["student_id"], "Interview scheduled", message, "interview", application_id)
+        return jsonify({"application": {"id": application_id, "status": "interview", "interview": interview}})
+
+    @app.get("/api/notifications")
+    @require_user()
+    def list_notifications():
+        notifications = list(
+            _database()["notifications"]
+            .find({"user_id": g.user["_id"]})
+            .sort("created_at", -1)
+            .limit(50)
+        )
+        return jsonify({"notifications": [_notification_payload(item) for item in notifications]})
+
+    @app.patch("/api/notifications/<notification_id>/read")
+    @require_user()
+    def mark_notification_read(notification_id):
+        if not ObjectId.is_valid(notification_id):
+            return jsonify({"error": "Notification not found."}), 404
+        database = _database()
+        result = database["notifications"].update_one(
+            {"_id": ObjectId(notification_id), "user_id": g.user["_id"]},
+            {"$set": {"read": True}},
+        )
+        if result.matched_count == 0:
+            return jsonify({"error": "Notification not found."}), 404
+        notification = database["notifications"].find_one({"_id": ObjectId(notification_id)})
+        return jsonify({"notification": _notification_payload(notification)})
 
     @app.post("/api/test-cases/generate")
     @require_user()

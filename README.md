@@ -12,6 +12,10 @@ HireTest AI is an AI-assisted software testing platform. Its application under t
 - Flask REST API with MongoDB Atlas/PyMongo configuration.
 - Student and recruiter account registration/sign-in with hashed passwords and signed expiring tokens.
 - MongoDB-backed job listing, recruiter job creation, student applications, and recruiter applicant status updates.
+- Student job-match profiles and deterministic recommendations based on skills and interests; fictional demo listings are excluded.
+- Validated application contact details, skills, cover notes, and optional HTTPS resume links, visible to the posting recruiter.
+- Persisted application-status and interview notifications, delivered in-app over authenticated Socket.IO connections and available in the notification inbox.
+- Recruiter interview scheduling with future-date validation and optional HTTPS meeting links; students see the invitation in their application list and inbox.
 - Job-type filters, job sorting, device-local saved-job shortlists, and recruiter applicant search/status filters.
 - Rule-based test-case generation stored per signed-in tester; test cases can be edited and approved before execution, and no generated code is executed.
 - Clearly labeled fictional job listings and unapproved starter test-case examples appear when a workspace is empty. Demo listings cannot accept applications, and examples do not create test results.
@@ -22,6 +26,8 @@ HireTest AI is an AI-assisted software testing platform. Its application under t
 ### Not implemented yet
 
 The full master prompt is larger than a single safe delivery. Background Playwright test execution, bug triage, visual regression, PDF reports, and AI-provider integration are later phases. The UI labels these areas as under development instead of presenting fake outcomes.
+
+Job recommendations currently use keyword matching against published job titles, descriptions, and locations; they are deterministic, not AI-generated. Notifications are persisted and delivered in the app while a user is connected. Email and operating-system push notifications require an external provider and are not configured.
 
 ## Architecture
 

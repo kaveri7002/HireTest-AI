@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
   Activity, ArrowUpRight, Bookmark, BriefcaseBusiness, Bug,
-  CheckCircle2, ChevronDown, CircleHelp, Clock3, FileCheck2, FlaskConical,
+  Bell, CalendarDays, CheckCircle2, ChevronDown, CircleHelp, Clock3, FileCheck2, FlaskConical,
   LayoutDashboard, ListChecks, Menu, Plus, Search, Settings2, ShieldCheck,
   Sparkles, X, Pencil,
 } from 'lucide-react'
+import { io } from 'socket.io-client'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -33,13 +34,19 @@ type StudentApplication = {
   job: { id: string; title: string; company: string }
   status: string
   createdAt: string
+  interview?: { scheduledAt: string; meetingUrl: string }
 }
 
 type Applicant = {
   id: string
   student: { id: string; name: string; email: string }
+  phone: string
+  skills: string[]
+  coverLetter: string
+  resumeUrl: string
   status: string
   createdAt: string
+  interview?: { scheduledAt: string; meetingUrl: string }
 }
 
 type TestCase = {
@@ -52,6 +59,9 @@ type TestCase = {
   isExample: boolean
 }
 type User = { id: string; name: string; email: string; role: 'student' | 'recruiter' }
+type StudentProfile = { skills: string[]; interests: string }
+type JobRecommendation = { job: Job; matchScore: number; matchedSkills: string[] }
+type Notification = { id: string; title: string; message: string; kind: string; createdAt: string; read: boolean; applicationId: string | null }
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 const TOKEN_KEY = 'hiretest-token'
@@ -59,6 +69,7 @@ const navItems = [
   { id: 'command', label: 'Command Center', icon: LayoutDashboard },
   { id: 'jobs', label: 'HireTest Jobs', icon: BriefcaseBusiness },
   { id: 'cases', label: 'Test cases', icon: ListChecks },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'executions', label: 'Executions', icon: Activity },
   { id: 'bugs', label: 'Bug reports', icon: Bug },
 ] as const
@@ -69,6 +80,9 @@ function App() {
   const [page, setPage] = useState<PageId>('command')
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
+  const [recommendations, setRecommendations] = useState<JobRecommendation[]>([])
+  const [profile, setProfile] = useState<StudentProfile>({ skills: [], interests: '' })
+  const [notifications, setNotifications] = useState<Notification[]>([])
   const [savedJobIds, setSavedJobIds] = useState<string[]>([])
   const [myApplications, setMyApplications] = useState<StudentApplication[]>([])
   const [applicants, setApplicants] = useState<Applicant[]>([])
@@ -116,6 +130,96 @@ function App() {
     }
   }
 
+  async function loadNotifications(authToken = token) {
+    const response = await fetch(`${API_URL}/api/notifications`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+    const body = await response.json()
+    if (!response.ok) throw new Error(body.error || 'Could not load notifications.')
+    setNotifications(body.notifications)
+  }
+
+  async function loadStudentProfile(authToken = token) {
+    const [profileResponse, recommendationsResponse] = await Promise.all([
+      fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${authToken}` } }),
+      fetch(`${API_URL}/api/job-recommendations`, { headers: { Authorization: `Bearer ${authToken}` } }),
+    ])
+    const profileBody = await profileResponse.json()
+    const recommendationsBody = await recommendationsResponse.json()
+    if (!profileResponse.ok) throw new Error(profileBody.error || 'Could not load your profile.')
+    if (!recommendationsResponse.ok) throw new Error(recommendationsBody.error || 'Could not load job suggestions.')
+    setProfile(profileBody.profile)
+    setRecommendations(recommendationsBody.recommendations)
+  }
+
+  async function saveStudentProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!token) return
+    const formData = new FormData(event.currentTarget)
+    const skills = String(formData.get('skills') || '')
+      .split(',')
+      .map((skill) => skill.trim())
+      .filter(Boolean)
+    setBusy(true)
+    setNotice('')
+    try {
+      const response = await fetch(`${API_URL}/api/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ skills, interests: formData.get('interests') }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not save your profile.')
+      setProfile(body.profile)
+      const suggestionsResponse = await fetch(`${API_URL}/api/job-recommendations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const suggestionsBody = await suggestionsResponse.json()
+      if (!suggestionsResponse.ok) throw new Error(suggestionsBody.error || 'Could not refresh job suggestions.')
+      setRecommendations(suggestionsBody.recommendations)
+      setNotice('Profile saved. Job suggestions updated.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not save your profile.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function markNotificationRead(notificationId: string) {
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/${notificationId}/read`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not update notification.')
+      setNotifications((current) => current.map((item) => item.id === notificationId ? body.notification : item))
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not update notification.')
+    }
+  }
+
+  async function scheduleInterview(applicationId: string, scheduledAt: string, meetingUrl: string) {
+    try {
+      const response = await fetch(`${API_URL}/api/applications/${applicationId}/interview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ scheduledAt: new Date(scheduledAt).toISOString(), meetingUrl }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not schedule the interview.')
+      setApplicants((current) => current.map((applicant) => (
+        applicant.id === applicationId
+          ? { ...applicant, status: body.application.status, interview: body.application.interview }
+          : applicant
+      )))
+      await loadNotifications()
+      setNotice('Interview scheduled. The applicant has been notified.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not schedule the interview.')
+    }
+  }
+
   async function loadMyApplications(authToken = token) {
     const response = await fetch(`${API_URL}/api/my-applications`, {
       headers: { Authorization: `Bearer ${authToken}` },
@@ -153,6 +257,7 @@ function App() {
       setApplicants((current) => current.map((applicant) => (
         applicant.id === applicationId ? { ...applicant, status: body.application.status } : applicant
       )))
+      await loadNotifications()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not update application.')
     }
@@ -208,6 +313,43 @@ function App() {
       setNotice('Saved jobs could not be loaded from this device.')
     }
   }, [user?.id])
+
+  useEffect(() => {
+    if (!user || !token) return
+    void loadNotifications().catch((error: unknown) => {
+      setNotice(error instanceof Error ? error.message : 'Could not load notifications.')
+    })
+    if (user.role === 'student') {
+      void loadStudentProfile().catch((error: unknown) => {
+        setNotice(error instanceof Error ? error.message : 'Could not load job suggestions.')
+      })
+    }
+  }, [user?.id, token])
+
+  useEffect(() => {
+    if (!user || !token) return
+    const socket = io(API_URL || window.location.origin, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    })
+    socket.on('notification', (notification: Notification) => {
+      setNotifications((current) => [
+        notification,
+        ...current.filter((item) => item.id !== notification.id),
+      ].slice(0, 50))
+      if (user.role === 'student') {
+        void loadMyApplications().catch((error: unknown) => {
+          setNotice(error instanceof Error ? error.message : 'Could not refresh applications.')
+        })
+      }
+    })
+    socket.on('connect_error', (error) => {
+      setNotice(`Live notifications unavailable: ${error.message}`)
+    })
+    return () => {
+      socket.disconnect()
+    }
+  }, [user?.id, token])
 
   useEffect(() => {
     if (!token) {
@@ -333,19 +475,30 @@ function App() {
     }
   }
 
-  async function applyToJob(jobId: string) {
+  async function applyToJob(jobId: string, details: { name: string; email: string; phone: string; skills: string; coverLetter: string; resumeUrl: string }) {
     setNotice('')
     try {
       const response = await fetch(`${API_URL}/api/jobs/${jobId}/applications`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ...details,
+          skills: details.skills.split(',').map((skill) => skill.trim()).filter(Boolean),
+        }),
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || 'Could not submit application.')
       setNotice('Your application was submitted.')
-      await loadMyApplications()
+      void loadMyApplications().catch((error: unknown) => {
+        setNotice(error instanceof Error ? error.message : 'Application submitted, but your applications could not be refreshed.')
+      })
+      void loadNotifications().catch((error: unknown) => {
+        setNotice(error instanceof Error ? error.message : 'Application submitted, but notifications could not be refreshed.')
+      })
+      return true
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not submit application.')
+      return false
     }
   }
 
@@ -355,6 +508,9 @@ function App() {
     setUser(null)
     setDashboard(null)
     setCases([])
+    setNotifications([])
+    setRecommendations([])
+    setProfile({ skills: [], interests: '' })
     setNotice('')
   }
 
@@ -381,6 +537,7 @@ function App() {
             <button key={id} className={`nav-item ${page === id ? 'nav-active' : ''}`} onClick={() => { setPage(id); setSidebarOpen(false) }}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
               {id === 'bugs' && dashboard?.failed ? <span className="nav-badge">{dashboard.failed}</span> : null}
+              {id === 'notifications' && notifications.some((item) => !item.read) ? <span className="nav-badge">{notifications.filter((item) => !item.read).length}</span> : null}
             </button>
           ))}
         </nav>
@@ -412,8 +569,9 @@ function App() {
         <div className="page-content">
           {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss message"><X size={16} /></button></div>}
           {page === 'command' && <CommandCenter dashboard={dashboard} passedPercent={passedPercent} onNavigate={setPage} />}
-          {page === 'jobs' && <JobsPage jobs={jobs} search={jobSearch} setSearch={setJobSearch} onSearch={() => void loadJobs()} loading={loadingJobs} onCreate={createDemoJob} onApply={applyToJob} busy={busy} user={user} myApplications={myApplications} applicants={applicants} applicantsForJob={applicantsForJob} onViewApplicants={loadApplicants} onUpdateApplication={updateApplicationStatus} savedJobIds={savedJobIds} onToggleSavedJob={toggleSavedJob} />}
+          {page === 'jobs' && <JobsPage jobs={jobs} recommendations={recommendations} profile={profile} onSaveProfile={saveStudentProfile} search={jobSearch} setSearch={setJobSearch} onSearch={() => void loadJobs()} loading={loadingJobs} onCreate={createDemoJob} onApply={applyToJob} onScheduleInterview={scheduleInterview} busy={busy} user={user} myApplications={myApplications} applicants={applicants} applicantsForJob={applicantsForJob} onViewApplicants={loadApplicants} onUpdateApplication={updateApplicationStatus} savedJobIds={savedJobIds} onToggleSavedJob={toggleSavedJob} />}
           {page === 'cases' && <CasesPage cases={cases} requirement={requirement} setRequirement={setRequirement} onGenerate={generateCases} onUpdate={updateTestCase} busy={busy} />}
+          {page === 'notifications' && <NotificationsPage notifications={notifications} onMarkRead={markNotificationRead} />}
           {page === 'executions' && <EmptyPage title="Test executions" icon={<Activity size={20} />} description="Execution history will appear here after the Playwright worker is configured." />}
           {page === 'bugs' && <EmptyPage title="Bug reports" icon={<Bug size={20} />} description="Failed assertions will create bug reports in a later phase. No results are fabricated." />}
         </div>
@@ -503,12 +661,14 @@ function CommandCenter({ dashboard, passedPercent, onNavigate }: { dashboard: Da
   )
 }
 
-function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onApply, busy, user, myApplications, applicants, applicantsForJob, onViewApplicants, onUpdateApplication, savedJobIds, onToggleSavedJob }: { jobs: Job[]; search: string; setSearch: (value: string) => void; onSearch: () => void; loading: boolean; onCreate: (event: FormEvent<HTMLFormElement>) => void; onApply: (jobId: string) => void; busy: boolean; user: User; myApplications: StudentApplication[]; applicants: Applicant[]; applicantsForJob: string; onViewApplicants: (jobId: string) => void; onUpdateApplication: (applicationId: string, status: string) => void; savedJobIds: string[]; onToggleSavedJob: (jobId: string) => void }) {
+function JobsPage({ jobs, recommendations, profile, onSaveProfile, search, setSearch, onSearch, loading, onCreate, onApply, onScheduleInterview, busy, user, myApplications, applicants, applicantsForJob, onViewApplicants, onUpdateApplication, savedJobIds, onToggleSavedJob }: { jobs: Job[]; recommendations: JobRecommendation[]; profile: StudentProfile; onSaveProfile: (event: FormEvent<HTMLFormElement>) => void; search: string; setSearch: (value: string) => void; onSearch: () => void; loading: boolean; onCreate: (event: FormEvent<HTMLFormElement>) => void; onApply: (jobId: string, details: { name: string; email: string; phone: string; skills: string; coverLetter: string; resumeUrl: string }) => Promise<boolean>; onScheduleInterview: (applicationId: string, scheduledAt: string, meetingUrl: string) => void; busy: boolean; user: User; myApplications: StudentApplication[]; applicants: Applicant[]; applicantsForJob: string; onViewApplicants: (jobId: string) => void; onUpdateApplication: (applicationId: string, status: string) => void; savedJobIds: string[]; onToggleSavedJob: (jobId: string) => void }) {
   const [typeFilter, setTypeFilter] = useState('All job types')
   const [sortOrder, setSortOrder] = useState('newest')
   const [showSavedOnly, setShowSavedOnly] = useState(false)
   const [applicantSearch, setApplicantSearch] = useState('')
   const [applicantStatus, setApplicantStatus] = useState('all')
+  const [applyingTo, setApplyingTo] = useState('')
+  const [schedulingFor, setSchedulingFor] = useState('')
   const jobTypes = [...new Set(jobs.map((job) => job.type))]
   const visibleJobs = jobs
     .filter((job) => typeFilter === 'All job types' || job.type === typeFilter)
@@ -540,6 +700,21 @@ function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onAppl
           {user.role === 'student' && <button className={`button ${showSavedOnly ? 'button-primary' : 'button-secondary'}`} onClick={() => setShowSavedOnly((current) => !current)}><Bookmark size={15} /> Saved ({savedJobIds.length})</button>}
         </div>
       </section>
+      {user.role === 'student' && <section className="student-tools-grid">
+        <form className="panel profile-form" onSubmit={onSaveProfile}>
+          <div className="panel-heading"><div><h2>Job-match profile</h2><p>Add your skills and interests to get suggestions.</p></div></div>
+          <label>Skills (comma-separated)<input name="skills" maxLength={1200} defaultValue={profile.skills.join(', ')} placeholder="e.g. Python, QA, React" /></label>
+          <label>Interests<textarea name="interests" rows={2} maxLength={1000} defaultValue={profile.interests} placeholder="What kind of roles are you looking for?" /></label>
+          <button className="button button-primary" disabled={busy}>Update suggestions</button>
+        </form>
+        <section className="panel recommendations-panel">
+          <div className="panel-heading"><div><h2>Suggested jobs</h2><p>Matched against your saved skills and interests.</p></div><Sparkles size={17} className="sparkle" /></div>
+          {recommendations.length ? recommendations.map(({ job, matchScore, matchedSkills }) => <article className="recommendation-row" key={job.id}>
+            <div><strong>{job.title}</strong><span>{job.company} · {job.location}</span><small>Matched: {matchedSkills.join(', ')}</small></div>
+            <button className="button button-secondary" onClick={() => { setSearch(job.title); onSearch() }}>{matchScore}% match · View</button>
+          </article>) : <p className="recommendation-empty">{profile.skills.length || profile.interests ? 'No matching real job listings yet. Your suggestions update when recruiters post matching roles.' : 'Add skills or interests above to get job suggestions.'}</p>}
+        </section>
+      </section>}
       <div className="jobs-layout">
         <section className="job-results">
           <div className="section-title"><h2>{showSavedOnly ? 'Saved jobs' : 'Open roles'}</h2><span>{visibleJobs.length} listed</span></div>
@@ -554,22 +729,91 @@ function JobsPage({ jobs, search, setSearch, onSearch, loading, onCreate, onAppl
                   <p>{job.company} <span>·</span> {job.location}</p><small>{job.description}</small>
                 </div>
                 {user.role === 'student' && <button className={`save-job-button ${isSaved ? 'saved' : ''}`} aria-label={isSaved ? `Remove ${job.title} from saved jobs` : `Save ${job.title}`} title={isSaved ? 'Remove from saved jobs' : 'Save job'} onClick={() => onToggleSavedJob(job.id)}><Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} /></button>}
-                {user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => onApply(job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : 'Apply'}</button> : <button className="button button-secondary" disabled={job.isDemo} onClick={() => onViewApplicants(job.id)}>{job.isDemo ? 'Sample only' : 'View applicants'}</button>}
+                {user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => setApplyingTo(applyingTo === job.id ? '' : job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : applyingTo === job.id ? 'Close form' : 'Apply'}</button> : <button className="button button-secondary" disabled={job.isDemo} onClick={() => onViewApplicants(job.id)}>{job.isDemo ? 'Sample only' : 'View applicants'}</button>}
               </article>
+              {user.role === 'student' && applyingTo === job.id && <ApplicationForm user={user} onCancel={() => setApplyingTo('')} onSubmit={async (details) => { const submitted = await onApply(job.id, details); if (submitted) setApplyingTo('') }} />}
               {user.role === 'recruiter' && applicantsForJob === job.id && <section className="panel applicant-list">
                 <div className="applicant-heading"><h3>Applicants for {job.title}</h3><span>{applicants.length} total</span></div>
                 <div className="applicant-filters"><input aria-label="Search applicants" placeholder="Search name or email" value={applicantSearch} onChange={(event) => setApplicantSearch(event.target.value)} /><select aria-label="Filter applicants by status" value={applicantStatus} onChange={(event) => setApplicantStatus(event.target.value)}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>
-                {applicants.length ? applicants.filter((applicant) => applicant.status === applicantStatus || applicantStatus === 'all').filter((applicant) => `${applicant.student.name} ${applicant.student.email}`.toLowerCase().includes(applicantSearch.trim().toLowerCase())).map((applicant) => <div className="applicant-row" key={applicant.id}><div><strong>{applicant.student.name}</strong><span>{applicant.student.email}</span></div><select aria-label={`Status for ${applicant.student.name}`} value={applicant.status} onChange={(event) => onUpdateApplication(applicant.id, event.target.value)}><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>) : <p>No applications have been submitted for this role yet.</p>}
+                {applicants.length ? applicants.filter((applicant) => applicant.status === applicantStatus || applicantStatus === 'all').filter((applicant) => `${applicant.student.name} ${applicant.student.email}`.toLowerCase().includes(applicantSearch.trim().toLowerCase())).map((applicant) => <article className="applicant-detail" key={applicant.id}>
+                  <div className="applicant-row"><div><strong>{applicant.student.name}</strong><span>{applicant.student.email}{applicant.phone ? ` · ${applicant.phone}` : ''}</span></div><select aria-label={`Status for ${applicant.student.name}`} value={applicant.status} onChange={(event) => onUpdateApplication(applicant.id, event.target.value)}><option value="submitted">Submitted</option><option value="reviewing">Reviewing</option><option value="shortlisted">Shortlisted</option><option value="interview">Interview</option><option value="rejected">Rejected</option><option value="hired">Hired</option></select></div>
+                  {applicant.skills.length > 0 && <p><strong>Skills:</strong> {applicant.skills.join(', ')}</p>}
+                  {applicant.coverLetter && <p><strong>Application note:</strong> {applicant.coverLetter}</p>}
+                  {applicant.resumeUrl && <a href={applicant.resumeUrl} target="_blank" rel="noreferrer">Open resume link</a>}
+                  {applicant.interview && <p className="interview-summary">Interview: {new Date(applicant.interview.scheduledAt).toLocaleString()}{applicant.interview.meetingUrl ? <> · <a href={applicant.interview.meetingUrl} target="_blank" rel="noreferrer">Meeting link</a></> : null}</p>}
+                  {schedulingFor === applicant.id ? <InterviewScheduleForm onCancel={() => setSchedulingFor('')} onSchedule={(scheduledAt, meetingUrl) => { onScheduleInterview(applicant.id, scheduledAt, meetingUrl); setSchedulingFor('') }} /> : <button className="button button-secondary" onClick={() => setSchedulingFor(applicant.id)}><CalendarDays size={14} /> Schedule interview</button>}
+                </article>) : <p>No applications have been submitted for this role yet.</p>}
                 {applicants.length > 0 && applicants.filter((applicant) => applicant.status === applicantStatus || applicantStatus === 'all').filter((applicant) => `${applicant.student.name} ${applicant.student.email}`.toLowerCase().includes(applicantSearch.trim().toLowerCase())).length === 0 && <p>No applicants match these filters.</p>}
               </section>}
             </div>
           }) : <div className="panel job-empty"><div className="empty-icon"><BriefcaseBusiness size={20} /></div><strong>{showSavedOnly ? 'No saved jobs' : 'No jobs found'}</strong><span>{showSavedOnly ? 'Use the bookmark button on a listing to save it here.' : 'Try another job type or search, or add a real listing below.'}</span></div>}
         </section>
-        {user.role === 'student' && <section className="panel my-applications"><div className="panel-heading"><div><h2>My applications</h2><p>Current status of your submitted applications.</p></div><span>{myApplications.length}</span></div>{myApplications.length ? myApplications.map((application) => <div className="applicant-row" key={application.id}><div><strong>{application.job.title}</strong><span>{application.job.company}</span></div><span className="job-type">{application.status}</span></div>) : <p>You have not applied to any jobs yet.</p>}</section>}
+        {user.role === 'student' && <section className="panel my-applications"><div className="panel-heading"><div><h2>My applications</h2><p>Status and interview updates for your submissions.</p></div><span>{myApplications.length}</span></div>{myApplications.length ? myApplications.map((application) => <article className="application-summary" key={application.id}><div className="applicant-row"><div><strong>{application.job.title}</strong><span>{application.job.company}</span></div><span className="job-type">{application.status}</span></div>{application.interview && <p className="interview-summary"><CalendarDays size={14} /> {new Date(application.interview.scheduledAt).toLocaleString()}{application.interview.meetingUrl ? <> · <a href={application.interview.meetingUrl} target="_blank" rel="noreferrer">Join interview</a></> : null}</p>}</article>) : <p>You have not applied to any jobs yet.</p>}</section>}
         <aside className="panel job-create-panel"><div className="panel-heading"><div><h2>Recruiter quick post</h2><p>Job publishing requires a recruiter account.</p></div></div>{user.role === 'recruiter' ? <form className="quick-form" onSubmit={onCreate}><label>Job title<input required name="title" maxLength={120} placeholder="e.g. QA Engineer" /></label><label>Company<input required name="company" maxLength={120} placeholder="Your company" /></label><label>Location<input required name="location" maxLength={120} placeholder="City or remote" /></label><label>Job type<select name="type"><option>Full time</option><option>Part time</option><option>Contract</option><option>Internship</option></select></label><label>Description<textarea required name="description" maxLength={5000} rows={3} placeholder="What will this person do?" /></label><button className="button button-primary" disabled={busy}><Plus size={16} /> {busy ? 'Saving…' : 'Create job posting'}</button></form> : <div className="role-note"><BriefcaseBusiness size={18} /><p>Sign in with a recruiter account to publish job listings. Student applicants can browse listings.</p></div>}</aside>
       </div>
     </>
   )
+}
+
+function ApplicationForm({ user, onSubmit, onCancel }: { user: User; onSubmit: (details: { name: string; email: string; phone: string; skills: string; coverLetter: string; resumeUrl: string }) => Promise<void>; onCancel: () => void }) {
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    setSubmitting(true)
+    try {
+      await onSubmit({
+        name: String(formData.get('name') || ''),
+        email: String(formData.get('email') || ''),
+        phone: String(formData.get('phone') || ''),
+        skills: String(formData.get('skills') || ''),
+        coverLetter: String(formData.get('coverLetter') || ''),
+        resumeUrl: String(formData.get('resumeUrl') || ''),
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return <form className="panel application-form" onSubmit={submit}>
+    <div className="panel-heading"><div><h3>Application details</h3><p>Review your contact information before submitting to the recruiter.</p></div></div>
+    <div className="application-form-grid">
+      <label>Full name<input name="name" required maxLength={80} defaultValue={user.name} /></label>
+      <label>Contact email<input name="email" type="email" required maxLength={254} defaultValue={user.email} /></label>
+      <label>Phone (optional)<input name="phone" type="tel" maxLength={30} pattern="[+0-9() .-]{7,30}" placeholder="+1 555 123 4567" /></label>
+      <label>Skills (comma-separated)<input name="skills" maxLength={1200} placeholder="QA, Python, React" /></label>
+      <label className="application-form-wide">Resume link (optional)<input name="resumeUrl" type="url" pattern="https://.*" maxLength={2048} placeholder="https://example.com/my-resume" /></label>
+      <label className="application-form-wide">Short note (optional)<textarea name="coverLetter" rows={3} maxLength={3000} placeholder="Share why you are interested in this role." /></label>
+    </div>
+    <div className="case-edit-actions"><button className="button button-primary" type="submit" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit application'}</button><button className="button button-secondary" type="button" disabled={submitting} onClick={onCancel}>Cancel</button></div>
+  </form>
+}
+
+function InterviewScheduleForm({ onSchedule, onCancel }: { onSchedule: (scheduledAt: string, meetingUrl: string) => void; onCancel: () => void }) {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    onSchedule(String(formData.get('scheduledAt')), String(formData.get('meetingUrl') || ''))
+  }
+  const minDateTime = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+
+  return <form className="interview-form" onSubmit={submit}>
+    <label>Interview date and time<input name="scheduledAt" type="datetime-local" min={minDateTime} required /></label>
+    <label>Meeting link (optional)<input name="meetingUrl" type="url" pattern="https://.*" maxLength={2048} placeholder="https://meet.example.com/..." /></label>
+    <div className="case-edit-actions"><button className="button button-primary" type="submit">Send interview invite</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
+  </form>
+}
+
+function NotificationsPage({ notifications, onMarkRead }: { notifications: Notification[]; onMarkRead: (notificationId: string) => void }) {
+  return <section className="panel notifications-panel">
+    <div className="panel-heading"><div><p className="eyebrow">LIVE UPDATES</p><h2>Notifications</h2><p>Application and interview updates arrive here as they happen.</p></div><Bell size={20} className="sparkle" /></div>
+    {notifications.length ? notifications.map((notification) => <article className={`notification-row ${notification.read ? '' : 'notification-unread'}`} key={notification.id}>
+      <div className="notification-icon"><Bell size={16} /></div>
+      <div className="notification-copy"><strong>{notification.title}</strong><p>{notification.message}</p><time dateTime={notification.createdAt}>{new Date(notification.createdAt).toLocaleString()}</time></div>
+      {!notification.read && <button className="button button-secondary" onClick={() => onMarkRead(notification.id)}>Mark read</button>}
+    </article>) : <div className="job-empty"><div className="empty-icon"><Bell size={20} /></div><strong>You’re all caught up</strong><span>Application updates and interview invitations will appear here.</span></div>}
+  </section>
 }
 
 function CasesPage({ cases, requirement, setRequirement, onGenerate, onUpdate, busy }: { cases: TestCase[]; requirement: string; setRequirement: (value: string) => void; onGenerate: (event: React.FormEvent<HTMLFormElement>) => void; onUpdate: (caseId: string, changes: Partial<TestCase>) => Promise<boolean>; busy: boolean }) {

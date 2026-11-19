@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from playwright.sync_api import expect
 
 from backend.tests.pages.auth_page import AuthPage
@@ -46,12 +48,33 @@ def test_recruiter_posts_and_student_applies_to_a_job(page, live_server):
 
     jobs.open()
     jobs.apply_for("Playwright QA Engineer")
+    application_form = page.locator(".application-form")
+    application_form.get_by_label("Phone (optional)").fill("+1 555 123 4567")
+    application_form.get_by_label("Skills (comma-separated)").fill("Python, Playwright")
+    application_form.get_by_label("Resume link (optional)").fill("https://example.test/portal-student-resume")
+    application_form.get_by_label("Short note (optional)").fill("I enjoy testing browser workflows.")
+    page.get_by_role("button", name="Submit application").click()
     expect(page.get_by_role("status")).to_contain_text("Your application was submitted.")
 
     expect(page.get_by_role("button", name="Applied · submitted")).to_be_disabled()
     expect(page.get_by_role("heading", name="My applications")).to_be_visible()
-
     auth.sign_out()
     auth.sign_in("recruiter@e2e.test", "StrongPassword123")
     jobs.open()
     jobs.review_applicants("Playwright QA Engineer", "Portal Student", "shortlisted")
+    expect(page.get_by_text("+1 555 123 4567")).to_be_visible()
+    expect(page.get_by_text("Python, Playwright")).to_be_visible()
+    expect(page.get_by_text("I enjoy testing browser workflows.")).to_be_visible()
+    page.get_by_role("button", name="Schedule interview").click()
+    scheduled_at = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+    page.locator('input[name="scheduledAt"]').fill(scheduled_at)
+    page.get_by_label("Meeting link (optional)").fill("https://meet.example.test/hiretest")
+    page.get_by_role("button", name="Send interview invite").click()
+    expect(page.get_by_role("status")).to_contain_text("Interview scheduled.")
+
+    auth.sign_out()
+    auth.sign_in("student@e2e.test", "StrongPassword123")
+    jobs.open()
+    expect(page.get_by_role("link", name="Join interview")).to_be_visible()
+    page.get_by_role("button", name="Notifications").click()
+    expect(page.get_by_text("Interview scheduled", exact=True)).to_be_visible()

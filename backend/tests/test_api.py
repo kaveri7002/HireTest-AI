@@ -1,4 +1,4 @@
-from backend.app import create_app
+from backend.app import create_app, socketio
 
 
 def test_health_reports_mongodb_connection(client):
@@ -238,3 +238,101 @@ def test_application_routes_enforce_recruiter_ownership_and_valid_status(client,
         headers=recruiter_headers,
         json={"status": "unknown"},
     ).status_code == 400
+
+
+def test_student_profile_returns_matching_real_job_recommendations(client, student_headers, recruiter_headers):
+    profile = client.put("/api/profile", headers=student_headers, json={
+        "skills": ["Python", "React", "Python"],
+        "interests": "frontend testing",
+    })
+    assert profile.status_code == 200
+    assert profile.json["profile"] == {"skills": ["Python", "React"], "interests": "frontend testing"}
+
+    created = client.post("/api/jobs", headers=recruiter_headers, json={
+        "title": "React QA Engineer",
+        "company": "Example Co",
+        "location": "Remote",
+        "description": "Use Python and React to test frontend applications.",
+    })
+    recommendations = client.get("/api/job-recommendations", headers=student_headers)
+    assert recommendations.status_code == 200
+    assert [item["job"]["id"] for item in recommendations.json["recommendations"]] == [created.json["job"]["id"]]
+    assert recommendations.json["recommendations"][0]["matchedSkills"] == ["python", "react"]
+    assert all(not item["job"]["isDemo"] for item in recommendations.json["recommendations"])
+
+    assert client.put("/api/profile", headers=student_headers, json={
+        "skills": [" "],
+        "interests": "",
+    }).status_code == 400
+
+
+def test_application_details_notifications_and_interview_scheduling(client, app, recruiter_headers):
+    recruiter_socket = socketio.test_client(app, auth={"token": recruiter_headers["Authorization"].split(" ", 1)[1]})
+    assert recruiter_socket.is_connected()
+    assert not socketio.test_client(app, auth={}).is_connected()
+
+    created = client.post("/api/jobs", headers=recruiter_headers, json={
+        "title": "QA Analyst",
+        "company": "Example Co",
+        "location": "Remote",
+        "description": "Test applications.",
+    })
+    job_id = created.json["job"]["id"]
+    student_response = client.post("/api/auth/register", json={
+        "name": "Applicant",
+        "email": "applicant@example.test",
+        "password": "StrongPassword123",
+        "role": "student",
+    })
+    student_headers = {"Authorization": f"Bearer {student_response.json['token']}"}
+
+    invalid = client.post(f"/api/jobs/{job_id}/applications", headers=student_headers, json={
+        "name": "Applicant",
+        "email": "applicant@example.test",
+        "resumeUrl": "http://insecure.example/resume",
+    })
+    assert invalid.status_code == 400
+
+    applied = client.post(f"/api/jobs/{job_id}/applications", headers=student_headers, json={
+        "name": "Applicant Name",
+        "email": "applicant@example.test",
+        "phone": "+1 555 123 4567",
+        "skills": ["Python", "QA"],
+        "coverLetter": "I am interested in this role.",
+        "resumeUrl": "https://example.test/resume",
+    })
+    assert applied.status_code == 201
+    application_id = applied.json["application"]["id"]
+    recruiter_application = client.get(
+        f"/api/jobs/{job_id}/applications",
+        headers=recruiter_headers,
+    ).json["applications"][0]
+    assert recruiter_application["student"]["name"] == "Applicant Name"
+    assert recruiter_application["phone"] == "+1 555 123 4567"
+    assert recruiter_application["skills"] == ["Python", "QA"]
+    assert recruiter_application["resumeUrl"] == "https://example.test/resume"
+    application_events = recruiter_socket.get_received()
+    assert any(event["args"][0]["kind"] == "application" for event in application_events)
+
+    from datetime import datetime, timedelta, timezone
+    scheduled_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    scheduled = client.post(
+        f"/api/applications/{application_id}/interview",
+        headers=recruiter_headers,
+        json={"scheduledAt": scheduled_at, "meetingUrl": "https://meet.example.test/room"},
+    )
+    assert scheduled.status_code == 200
+    assert scheduled.json["application"]["status"] == "interview"
+    assert scheduled.json["application"]["interview"]["meetingUrl"] == "https://meet.example.test/room"
+
+    notifications = client.get("/api/notifications", headers=student_headers).json["notifications"]
+    assert len(notifications) == 1
+    assert notifications[0]["kind"] == "interview"
+    assert "scheduled" in notifications[0]["message"]
+    marked_read = client.patch(
+        f"/api/notifications/{notifications[0]['id']}/read",
+        headers=student_headers,
+    )
+    assert marked_read.status_code == 200
+    assert marked_read.json["notification"]["read"] is True
+    assert client.get("/api/my-applications", headers=student_headers).json["applications"][0]["interview"]
