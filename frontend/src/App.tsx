@@ -26,6 +26,7 @@ type Job = {
   type: string
   description: string
   isDemo: boolean
+  isMine?: boolean
   createdAt: string
 }
 
@@ -116,7 +117,9 @@ function App() {
     setLoadingJobs(true)
     try {
       const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
-      const response = await fetch(`${API_URL}/api/jobs${query}`)
+      const response = await fetch(`${API_URL}/api/jobs${query}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || 'Could not load jobs.')
       setJobs(body.jobs)
@@ -729,7 +732,7 @@ function JobsPage({ jobs, recommendations, profile, onSaveProfile, search, setSe
                   <p>{job.company} <span>·</span> {job.location}</p><small>{job.description}</small>
                 </div>
                 {user.role === 'student' && <button className={`save-job-button ${isSaved ? 'saved' : ''}`} aria-label={isSaved ? `Remove ${job.title} from saved jobs` : `Save ${job.title}`} title={isSaved ? 'Remove from saved jobs' : 'Save job'} onClick={() => onToggleSavedJob(job.id)}><Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} /></button>}
-                {user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => setApplyingTo(applyingTo === job.id ? '' : job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : applyingTo === job.id ? 'Close form' : 'Apply'}</button> : <button className="button button-secondary" disabled={job.isDemo} onClick={() => onViewApplicants(job.id)}>{job.isDemo ? 'Sample only' : 'View applicants'}</button>}
+                {user.role === 'student' ? <button className="button button-secondary" disabled={Boolean(application) || job.isDemo} title={job.isDemo ? 'Sample listings cannot accept applications.' : undefined} onClick={() => setApplyingTo(applyingTo === job.id ? '' : job.id)}>{job.isDemo ? 'Sample only' : application ? `Applied · ${application.status}` : applyingTo === job.id ? 'Close form' : 'Apply'}</button> : job.isDemo ? <button className="button button-secondary" disabled>Sample only</button> : job.isMine ? <button className="button button-secondary" onClick={() => onViewApplicants(job.id)}>View applicants</button> : <button className="button button-secondary" disabled title="Only the recruiter who posted this job can review its applicants.">Other recruiter’s job</button>}
               </article>
               {user.role === 'student' && applyingTo === job.id && <ApplicationForm user={user} onCancel={() => setApplyingTo('')} onSubmit={async (details) => { const submitted = await onApply(job.id, details); if (submitted) setApplyingTo('') }} />}
               {user.role === 'recruiter' && applicantsForJob === job.id && <section className="panel applicant-list">

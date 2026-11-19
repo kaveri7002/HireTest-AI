@@ -388,6 +388,7 @@ def create_app(test_config=None):
                 {"location": {"$regex": safe_query, "$options": "i"}},
             ]
         jobs = list(database["jobs"].find(filters).sort("created_at", -1).limit(100))
+        viewer = _authorized_user()
         return jsonify({"jobs": [
             {
                 "id": str(job["_id"]),
@@ -397,6 +398,11 @@ def create_app(test_config=None):
                 "type": job.get("type", "Full time"),
                 "description": job["description"],
                 "isDemo": job.get("is_demo", False),
+                "isMine": bool(
+                    viewer
+                    and viewer.get("role") == "recruiter"
+                    and job.get("recruiter_id") == viewer["_id"]
+                ),
                 "createdAt": job["created_at"].isoformat(),
             }
             for job in jobs

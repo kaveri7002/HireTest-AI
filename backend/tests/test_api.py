@@ -74,6 +74,10 @@ def test_job_creation_is_recruiter_only_and_listing_is_searchable(client, recrui
     listed = client.get("/api/jobs?search=example").json["jobs"]
     assert listed[0]["id"] == created.json["job"]["id"]
     assert not any(job["isDemo"] for job in listed)
+    recruiter_listing = client.get("/api/jobs?search=example", headers=recruiter_headers).json["jobs"]
+    student_listing = client.get("/api/jobs?search=example", headers=student_headers).json["jobs"]
+    assert recruiter_listing[0]["isMine"] is True
+    assert student_listing[0]["isMine"] is False
 
 
 def test_empty_job_board_gets_labeled_demo_listings_that_cannot_accept_applications(client, student_headers):
@@ -217,6 +221,10 @@ def test_application_routes_enforce_recruiter_ownership_and_valid_status(client,
         "description": "Test applications.",
     })
     job_id = created.json["job"]["id"]
+    recruiter_listing = client.get("/api/jobs", headers=other_recruiter).json["jobs"]
+    owned_listing = client.get("/api/jobs", headers=recruiter_headers).json["jobs"]
+    assert next(job for job in recruiter_listing if job["id"] == job_id)["isMine"] is False
+    assert next(job for job in owned_listing if job["id"] == job_id)["isMine"] is True
     student_response = client.post("/api/auth/register", json={
         "name": "Applicant",
         "email": "applicant@example.test",

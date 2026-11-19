@@ -12,6 +12,7 @@ HireTest AI is an AI-assisted software testing platform. Its application under t
 - Flask REST API with MongoDB Atlas/PyMongo configuration.
 - Student and recruiter account registration/sign-in with hashed passwords and signed expiring tokens.
 - MongoDB-backed job listing, recruiter job creation, student applications, and recruiter applicant status updates.
+- Recruiters can view applications only for jobs they posted; the job board identifies other recruiters' listings so their applicant controls are not shown.
 - Student job-match profiles and deterministic recommendations based on skills and interests; fictional demo listings are excluded.
 - Validated application contact details, skills, cover notes, and optional HTTPS resume links, visible to the posting recruiter.
 - Persisted application-status and interview notifications, delivered in-app over authenticated Socket.IO connections and available in the notification inbox.
